@@ -2022,9 +2022,29 @@ const OshiCoachingApp = () => {
             </div>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
 };
 
 export default OshiCoachingApp;
+// フッターコンポーネント
+function Footer() {
+  return (
+    <footer className="bg-white border-t border-gray-200 mt-8">
+      <div className="max-w-7xl mx-auto py-6 px-4">
+        <div className="text-center text-sm text-gray-500 space-y-2">
+          <p>© 2026 推しコーチング運営事務局</p>
+          <div className="flex justify-center space-x-4">
+            <a href="/privacy" className="hover:text-pink-600">プライバシーポリシー</a>
+            <span>|</span>
+            <a href="/terms" className="hover:text-pink-600">利用規約</a>
+            <span>|</span>
+            <a href="mailto:oshicoaching.official@gmail.com" className="hover:text-pink-600">お問い合わせ</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
