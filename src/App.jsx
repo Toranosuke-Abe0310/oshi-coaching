@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import Login from './Login'
-import { Heart, MessageCircle, Users, Calendar, FileText, Settings, LogOut, Menu, X, Search, ChevronDown } from 'lucide-react'
+import { Heart, MessageCircle, Users, Calendar, FileText, Settings, LogOut, Menu, X, Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 const OshiCoachingApp = () => {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
