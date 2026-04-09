@@ -182,44 +182,35 @@ const OshiCoachingApp = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
 
-  // メッセージ取得・リアルタイム購読
-  useEffect(() => {
+  // メッセージ取得
+  const fetchMessages = async () => {
     if (!session?.user) return;
     const userId = session.user.id;
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('created_at', { ascending: true });
+    if (data) {
+      setMessages(data.map(m => ({
+        id: m.id,
+        sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
+        text: m.text,
+        time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        sender_id: m.sender_id,
+        receiver_id: m.receiver_id
+      })));
+    }
+  };
 
-    const fetchMessages = async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-        .order('created_at', { ascending: true });
-      if (data) {
-        setMessages(data.map(m => ({
-          id: m.id,
-          sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
-          text: m.text,
-          time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-          sender_id: m.sender_id,
-          receiver_id: m.receiver_id
-        })));
-      }
-    };
+  useEffect(() => {
+    if (!session?.user) return;
     fetchMessages();
 
     const channel = supabase
       .channel('messages-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const m = payload.new;
-        if (m.sender_id === userId || m.receiver_id === userId) {
-          setMessages(prev => [...prev, {
-            id: m.id,
-            sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
-            text: m.text,
-            time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-            sender_id: m.sender_id,
-            receiver_id: m.receiver_id
-          }]);
-        }
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+        fetchMessages();
       })
       .subscribe();
 
@@ -229,12 +220,13 @@ const OshiCoachingApp = () => {
   // メッセージ送信
   const sendMessage = async (receiverId) => {
     if (!newMessage.trim() || !session?.user) return;
+    const msg = newMessage.trim();
+    setNewMessage('');
     await supabase.from('messages').insert({
       sender_id: session.user.id,
       receiver_id: receiverId,
-      text: newMessage.trim()
+      text: msg
     });
-    setNewMessage('');
   };
 
   // ローディング中
@@ -376,25 +368,25 @@ const OshiCoachingApp = () => {
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">メールアドレス</p>
-                              <p className="text-sm text-gray-600">coach@example.com</p>
+                              <p className="text-sm text-gray-600">{session?.user?.email || '未設定'}</p>
                             </div>
                           </div>
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">名前</p>
-                              <p className="text-sm text-gray-600">桜井 美咲</p>
+                              <p className="text-sm text-gray-600">{coachProfile.displayName}</p>
                             </div>
                           </div>
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">元所属グループ</p>
-                              <p className="text-sm text-gray-600">StarLight</p>
+                              <p className="text-sm text-gray-600">{coachProfile.formerGroup}</p>
                             </div>
                           </div>
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">専門分野</p>
-                              <p className="text-sm text-gray-600">キャリア相談</p>
+                              <p className="text-sm text-gray-600">{coachProfile.specialty}</p>
                             </div>
                           </div>
                         </div>
