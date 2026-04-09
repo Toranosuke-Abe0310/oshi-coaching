@@ -8,23 +8,28 @@ const OshiCoachingApp = () => {
   // デモモード: trueにするとログイン済みの画面が直接表示されます
   const [demoMode] = useState(false);
   const [userType, setUserType] = useState(null); // 'coach' or 'client'
+  const [userData, setUserData] = useState(null); // usersテーブルのデータ
+
+  const fetchUserData = async (userId) => {
+    const { data } = await supabase
+      .from('users')
+      .select('user_type, name, email')
+      .eq('id', userId)
+      .single();
+    if (data) {
+      setUserType(data.user_type);
+      setUserData(data);
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setLoading(false)
 
-      // ログインしている場合、usersテーブルからuser_typeを取得
+      // ログインしている場合、usersテーブルからuser_typeとnameを取得
       if (session?.user) {
-        supabase
-          .from('users')
-          .select('user_type')
-          .eq('id', session.user.id)
-          .single()
-          .then(({ data, error }) => {
-            if (data && data.user_type) {
-              setUserType(data.user_type)
-            }
-          })
+        fetchUserData(session.user.id);
       }
     })
 
@@ -33,20 +38,10 @@ const OshiCoachingApp = () => {
 
       // セッション変更時もuser_typeを取得
       if (session?.user) {
-        supabase
-          .from('users')
-          .select('user_type')
-          .eq('id', session.user.id)
-          .single()
-          .then(({ data, error }) => {
-            if (data && data.user_type) {
-              setUserType(data.user_type)
-            } else {
-              setUserType(null)
-            }
-          })
+        fetchUserData(session.user.id);
       } else {
         setUserType(null)
+        setUserData(null)
       }
     })
 
@@ -56,6 +51,7 @@ const OshiCoachingApp = () => {
   const [selectedCoach, setSelectedCoach] = useState(null);
   const [coaches, setCoaches] = useState([]);
   const [coachesLoading, setCoachesLoading] = useState(true);
+  const [realClients, setRealClients] = useState([]); // Supabaseから取得した実際のクライアント
 
   // Supabaseからコーチ一覧を取得
   useEffect(() => {
@@ -67,6 +63,7 @@ const OshiCoachingApp = () => {
       if (data) {
         setCoaches(data.map(c => ({
           id: c.id,
+          user_id: c.user_id,
           name: c.display_name,
           former_group: c.former_group,
           specialty: c.specialty,
@@ -81,6 +78,55 @@ const OshiCoachingApp = () => {
     };
     fetchCoaches();
   }, []);
+
+  // コーチ側: Supabaseからクライアント一覧を取得（user_type='client'のユーザー）
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user) return;
+    const fetchClients = async () => {
+      const { data } = await supabase
+        .from('users')
+        .select('id, name, email, created_at')
+        .eq('user_type', 'client');
+      if (data && data.length > 0) {
+        setRealClients(data.map(u => ({
+          id: u.id, // 実際のSupabase UUID
+          name: u.name || u.email || '名前未設定',
+          joinDate: u.created_at?.split('T')[0] || '-',
+          sessions: 0,
+          lastMessage: '-',
+          nextSession: '-',
+          memo: '',
+          files: []
+        })));
+      }
+    };
+    fetchClients();
+  }, [userType, session]);
+
+  // コーチ側: 自分のコーチプロフィールをcoachesテーブルから取得して初期化
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user) return;
+    const fetchCoachProfile = async () => {
+      const { data } = await supabase
+        .from('coaches')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .single();
+      if (data) {
+        setCoachProfile({
+          displayName: data.display_name || '',
+          formerGroup: data.former_group || '',
+          specialty: data.specialty || '',
+          introduction: data.introduction || '',
+          sessionPrice: data.session_price || '',
+          availableDays: data.available_days || [],
+          image: data.image || '🌸'
+        });
+      }
+    };
+    fetchCoachProfile();
+  }, [userType, session]);
+
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedClient, setSelectedClient] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -374,7 +420,7 @@ const OshiCoachingApp = () => {
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">名前</p>
-                              <p className="text-sm text-gray-600">{coachProfile.displayName}</p>
+                              <p className="text-sm text-gray-600">{userData?.name || coachProfile.displayName || '未設定'}</p>
                             </div>
                           </div>
                           <div className="flex items-center justify-between py-3">
@@ -864,11 +910,18 @@ const OshiCoachingApp = () => {
                 <div>
                   <div className="mb-6">
                     <h2 className="text-2xl font-bold text-gray-800 mb-2">クライアント一覧</h2>
-                    <p className="text-gray-600">現在 {clients.length} 名のクライアントをサポート中</p>
+                    <p className="text-gray-600">現在 {realClients.length} 名のクライアントをサポート中</p>
                   </div>
 
+                  {realClients.length === 0 && (
+                    <div className="bg-white rounded-xl p-12 text-center shadow-sm">
+                      <Users className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600">まだクライアントがいません</p>
+                    </div>
+                  )}
+
                   <div className="grid gap-4">
-                    {clients.map(client => (
+                    {realClients.map(client => (
                       <div 
                         key={client.id}
                         onClick={() => {
@@ -1193,11 +1246,18 @@ const OshiCoachingApp = () => {
                         <div>
                           <h3 className="text-lg font-bold text-gray-800 mb-4">メッセージ</h3>
                           <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                            {messages.map(msg => (
+                            {messages
+                              .filter(m => {
+                                const myId = session?.user?.id;
+                                const partnerId = selectedClient?.id;
+                                return (m.sender_id === myId && m.receiver_id === partnerId) ||
+                                       (m.sender_id === partnerId && m.receiver_id === myId);
+                              })
+                              .map(msg => (
                               <div key={msg.id} className={`flex ${msg.sender === 'coach' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs px-4 py-2 rounded-lg ${
-                                  msg.sender === 'coach' 
-                                    ? 'bg-pink-500 text-white' 
+                                  msg.sender === 'coach'
+                                    ? 'bg-pink-500 text-white'
                                     : 'bg-gray-100 text-gray-800'
                                 }`}>
                                   <p>{msg.text}</p>
@@ -1625,11 +1685,19 @@ const OshiCoachingApp = () => {
 
                   <div className="p-6">
                     <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                      {messages.map(msg => (
+                      {messages
+                        .filter(m => {
+                          const myId = session?.user?.id;
+                          const partnerId = selectedCoach?.user_id;
+                          if (!partnerId) return false;
+                          return (m.sender_id === myId && m.receiver_id === partnerId) ||
+                                 (m.sender_id === partnerId && m.receiver_id === myId);
+                        })
+                        .map(msg => (
                         <div key={msg.id} className={`flex ${msg.sender === 'client' ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-xs px-4 py-2 rounded-lg ${
-                            msg.sender === 'client' 
-                              ? 'bg-pink-500 text-white' 
+                            msg.sender === 'client'
+                              ? 'bg-pink-500 text-white'
                               : 'bg-gray-100 text-gray-800'
                           }`}>
                             <p>{msg.text}</p>
@@ -1641,16 +1709,20 @@ const OshiCoachingApp = () => {
                       ))}
                     </div>
 
+                    {!selectedCoach?.user_id && (
+                      <p className="text-sm text-red-500 mb-2">コーチ情報が正しく読み込まれていません</p>
+                    )}
+
                     <div className="flex gap-2">
                       <input
                         type="text"
                         placeholder="メッセージを入力..."
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && selectedCoach) sendMessage(selectedCoach.user_id || selectedCoach.id); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && selectedCoach?.user_id) sendMessage(selectedCoach.user_id); }}
                         className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                       />
-                      <button onClick={() => selectedCoach && sendMessage(selectedCoach.user_id || selectedCoach.id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
+                      <button onClick={() => selectedCoach?.user_id && sendMessage(selectedCoach.user_id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
                         送信
                       </button>
                     </div>
