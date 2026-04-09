@@ -54,6 +54,33 @@ const OshiCoachingApp = () => {
   }, [])
 
   const [selectedCoach, setSelectedCoach] = useState(null);
+  const [coaches, setCoaches] = useState([]);
+  const [coachesLoading, setCoachesLoading] = useState(true);
+
+  // Supabaseからコーチ一覧を取得
+  useEffect(() => {
+    const fetchCoaches = async () => {
+      const { data, error } = await supabase
+        .from('coaches')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (data) {
+        setCoaches(data.map(c => ({
+          id: c.id,
+          name: c.display_name,
+          former_group: c.former_group,
+          specialty: c.specialty,
+          image: c.image || '🌸',
+          clients: c.clients_count || 0,
+          introduction: c.introduction || '',
+          sessionPrice: c.session_price || '',
+          availableDays: c.available_days || []
+        })));
+      }
+      setCoachesLoading(false);
+    };
+    fetchCoaches();
+  }, []);
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedClient, setSelectedClient] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -106,42 +133,6 @@ const OshiCoachingApp = () => {
     { id: 2, name: 'セッション記録_1月.pdf', uploadDate: '2024-01-25', size: '128KB' }
   ]);
 
-  // サンプルデータ
-  const coaches = [
-    { 
-      id: 1, 
-      name: '桜井 美咲', 
-      former_group: 'StarLight', 
-      specialty: 'キャリア相談', 
-      image: '🌸', 
-      clients: 12,
-      introduction: 'アイドル時代の経験を活かし、夢に向かって頑張るあなたをサポートします。一緒に目標達成を目指しましょう!',
-      sessionPrice: '10,000円/60分',
-      availableDays: ['月', '水', '金']
-    },
-    { 
-      id: 2, 
-      name: '田中 優花', 
-      former_group: 'Rainbow48', 
-      specialty: '自己啓発', 
-      image: '🌈', 
-      clients: 8,
-      introduction: '自分らしく輝けるよう、全力でサポートします。一緒に新しい自分を見つけましょう!',
-      sessionPrice: '8,000円/60分',
-      availableDays: ['火', '木', '土']
-    },
-    { 
-      id: 3, 
-      name: '山田 彩花', 
-      former_group: 'Crystal☆', 
-      specialty: '人間関係', 
-      image: '💎', 
-      clients: 15,
-      introduction: '人間関係の悩みに寄り添います。コミュニケーション力を一緒に高めていきましょう!',
-      sessionPrice: '12,000円/60分',
-      availableDays: ['月', '火', '金', '土']
-    },
-  ];
 
   const clients = [
     { 
