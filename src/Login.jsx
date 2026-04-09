@@ -7,7 +7,7 @@ const Login = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const [userType, setUserType] = useState('client') // 'coach' or 'client'
+  const [userType] = useState('client') // 新規登録は常にclient（コーチはAdmin経由で作成）
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
 
@@ -126,38 +126,9 @@ const Login = () => {
 
           {/* フォーム */}
           <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4">
-            {/* ユーザータイプ選択と名前入力（新規登録時のみ） */}
+            {/* 名前入力（新規登録時のみ） */}
             {!isLogin && (
               <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    登録タイプ
-                  </label>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setUserType('client')}
-                      className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
-                        userType === 'client'
-                          ? 'border-pink-500 bg-pink-50 text-pink-600 font-medium'
-                          : 'border-gray-300 text-gray-600 hover:border-pink-300'
-                      }`}
-                    >
-                      ファンとして登録
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUserType('coach')}
-                      className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
-                        userType === 'coach'
-                          ? 'border-pink-500 bg-pink-50 text-pink-600 font-medium'
-                          : 'border-gray-300 text-gray-600 hover:border-pink-300'
-                      }`}
-                    >
-                      コーチとして登録
-                    </button>
-                  </div>
-                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     お名前
@@ -244,6 +215,19 @@ const Login = () => {
             >
               {isLogin ? '新規登録はこちら' : 'ログインはこちら'}
             </button>
+          </div>
+
+          {/* コーチ申請リンク */}
+          <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+            <p className="text-xs text-gray-500 mb-2">コーチとして活動したい方</p>
+            <a
+              href="https://forms.gle/your-google-form-url"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-purple-600 hover:text-purple-700 font-medium underline"
+            >
+              コーチ申請フォームはこちら →
+            </a>
           </div>
         </div>
 
