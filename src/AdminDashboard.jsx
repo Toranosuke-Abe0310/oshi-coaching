@@ -1,11 +1,84 @@
 import React, { useState } from 'react';
-import { Shield, Check, X, Search, Mail, Phone, Users, Calendar } from 'lucide-react';
+import { Shield, Check, X, Search, Mail, Phone, Users, Calendar, UserPlus } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
 const AdminDashboard = () => {
   const [currentView, setCurrentView] = useState('pending'); // 'pending', 'approved', 'rejected'
   const [viewType, setViewType] = useState('client'); // 'client' or 'coach' applications
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApplication, setSelectedApplication] = useState(null);
+  const [mainTab, setMainTab] = useState('applications'); // 'applications' or 'createCoach'
+
+  // コーチ登録フォームのstate
+  const [coachForm, setCoachForm] = useState({
+    userId: '',
+    email: '',
+    name: '',
+    displayName: '',
+    formerGroup: '',
+    specialty: '',
+    introduction: '',
+    sessionPrice: '',
+    availableDays: [],
+    image: '🌸'
+  });
+  const [coachFormLoading, setCoachFormLoading] = useState(false);
+  const [coachFormMessage, setCoachFormMessage] = useState({ type: '', text: '' });
+
+  const handleCreateCoach = async (e) => {
+    e.preventDefault();
+    setCoachFormLoading(true);
+    setCoachFormMessage({ type: '', text: '' });
+
+    try {
+      // 1. usersテーブルにuser_type='coach'で登録
+      const { error: userError } = await supabase
+        .from('users')
+        .upsert({
+          id: coachForm.userId,
+          email: coachForm.email,
+          name: coachForm.name,
+          user_type: 'coach'
+        });
+      if (userError) throw new Error('usersテーブルへの登録失敗: ' + userError.message);
+
+      // 2. coachesテーブルにプロフィール登録
+      const { error: coachError } = await supabase
+        .from('coaches')
+        .insert({
+          user_id: coachForm.userId,
+          display_name: coachForm.displayName,
+          former_group: coachForm.formerGroup,
+          specialty: coachForm.specialty,
+          introduction: coachForm.introduction,
+          session_price: coachForm.sessionPrice,
+          available_days: coachForm.availableDays,
+          image: coachForm.image,
+          clients_count: 0
+        });
+      if (coachError) throw new Error('coachesテーブルへの登録失敗: ' + coachError.message);
+
+      setCoachFormMessage({ type: 'success', text: `${coachForm.displayName}さんのコーチアカウントを登録しました！` });
+      setCoachForm({
+        userId: '', email: '', name: '', displayName: '',
+        formerGroup: '', specialty: '', introduction: '',
+        sessionPrice: '', availableDays: [], image: '🌸'
+      });
+    } catch (err) {
+      setCoachFormMessage({ type: 'error', text: err.message });
+    } finally {
+      setCoachFormLoading(false);
+    }
+  };
+
+  const toggleDay = (day) => {
+    setCoachForm(prev => ({
+      ...prev,
+      availableDays: prev.availableDays.includes(day)
+        ? prev.availableDays.filter(d => d !== day)
+        : [...prev.availableDays, day]
+    }));
+  };
 
   // サンプルデータ - 承認待ちのコーチアカウント申請
   const [pendingCoachApplications, setPendingCoachApplications] = useState([
@@ -172,6 +245,203 @@ const AdminDashboard = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* メインタブ: 申し込み管理 vs コーチ登録 */}
+        <div className="mb-6">
+          <div className="bg-white rounded-xl shadow-sm p-2 inline-flex gap-2">
+            <button
+              onClick={() => setMainTab('applications')}
+              className={`px-6 py-3 rounded-lg font-medium transition-colors ${
+                mainTab === 'applications' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              申し込み管理
+            </button>
+            <button
+              onClick={() => setMainTab('createCoach')}
+              className={`px-6 py-3 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                mainTab === 'createCoach' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <UserPlus className="w-4 h-4" />
+              コーチ登録
+            </button>
+          </div>
+        </div>
+
+        {/* コーチ登録フォーム */}
+        {mainTab === 'createCoach' && (
+          <div className="max-w-2xl">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+              <h3 className="font-bold text-blue-800 mb-2">📋 コーチ登録の手順</h3>
+              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                <li>Supabaseダッシュボード → Authentication → Users → <strong>「Add user」</strong></li>
+                <li>コーチのメール・パスワードを設定してユーザーを作成</li>
+                <li>作成されたユーザーの <strong>UUID をコピー</strong></li>
+                <li>下のフォームにUUIDとプロフィール情報を入力して登録</li>
+              </ol>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-6">コーチアカウント登録</h2>
+
+              {coachFormMessage.text && (
+                <div className={`mb-4 p-3 rounded-lg text-sm ${
+                  coachFormMessage.type === 'error'
+                    ? 'bg-red-50 text-red-600 border border-red-200'
+                    : 'bg-green-50 text-green-600 border border-green-200'
+                }`}>
+                  {coachFormMessage.text}
+                </div>
+              )}
+
+              <form onSubmit={handleCreateCoach} className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+                  <p className="text-sm font-medium text-gray-700">Supabaseから取得する情報</p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ユーザーUUID <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={coachForm.userId}
+                      onChange={e => setCoachForm({...coachForm, userId: e.target.value})}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 font-mono text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス <span className="text-red-500">*</span></label>
+                    <input
+                      type="email"
+                      value={coachForm.email}
+                      onChange={e => setCoachForm({...coachForm, email: e.target.value})}
+                      placeholder="coach@example.com"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">本名 <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={coachForm.name}
+                    onChange={e => setCoachForm({...coachForm, name: e.target.value})}
+                    placeholder="山田 花子"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">表示名（コーチ一覧に表示） <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={coachForm.displayName}
+                    onChange={e => setCoachForm({...coachForm, displayName: e.target.value})}
+                    placeholder="山田 花子"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">元所属グループ</label>
+                  <input
+                    type="text"
+                    value={coachForm.formerGroup}
+                    onChange={e => setCoachForm({...coachForm, formerGroup: e.target.value})}
+                    placeholder="StarLight"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">専門分野</label>
+                  <input
+                    type="text"
+                    value={coachForm.specialty}
+                    onChange={e => setCoachForm({...coachForm, specialty: e.target.value})}
+                    placeholder="キャリア相談"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">自己紹介</label>
+                  <textarea
+                    value={coachForm.introduction}
+                    onChange={e => setCoachForm({...coachForm, introduction: e.target.value})}
+                    placeholder="アイドル時代の経験を活かし..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 h-24"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">セッション料金</label>
+                  <input
+                    type="text"
+                    value={coachForm.sessionPrice}
+                    onChange={e => setCoachForm({...coachForm, sessionPrice: e.target.value})}
+                    placeholder="10,000円/60分"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">対応可能曜日</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {['月', '火', '水', '木', '金', '土', '日'].map(day => (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => toggleDay(day)}
+                        className={`px-3 py-2 rounded-lg border-2 transition-colors text-sm ${
+                          coachForm.availableDays.includes(day)
+                            ? 'border-pink-500 bg-pink-50 text-pink-600'
+                            : 'border-gray-300 text-gray-600 hover:border-pink-300'
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">アイコン絵文字</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {['🌸', '⭐', '🌟', '💖', '🎀', '🌺', '✨', '🦋'].map(emoji => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setCoachForm({...coachForm, image: emoji})}
+                        className={`w-10 h-10 text-xl rounded-lg border-2 transition-colors ${
+                          coachForm.image === emoji ? 'border-pink-500 bg-pink-50' : 'border-gray-200 hover:border-pink-300'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={coachFormLoading}
+                  className={`w-full py-3 rounded-lg font-medium text-white transition-colors ${
+                    coachFormLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-pink-500 hover:bg-pink-600'
+                  }`}
+                >
+                  {coachFormLoading ? '登録中...' : 'コーチアカウントを登録する'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 申し込み管理 */}
+        {mainTab === 'applications' && (<>
         {/* タブ切り替え: クライアント申し込み vs コーチアカウント */}
         <div className="mb-6">
           <div className="bg-white rounded-xl shadow-sm p-2 inline-flex gap-2">
@@ -528,6 +798,7 @@ const AdminDashboard = () => {
             </div>
           </div>
         )}
+        </>)}
       </div>
     </div>
   );
