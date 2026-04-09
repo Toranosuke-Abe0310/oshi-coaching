@@ -179,11 +179,63 @@ const OshiCoachingApp = () => {
     },
   ];
 
-  const messages = [
-    { id: 1, sender: 'client', text: 'こんにちは!今週のセッションの準備ができました。', time: '10:30' },
-    { id: 2, sender: 'coach', text: 'ありがとうございます!今週も頑張りましょう✨', time: '10:45' },
-    { id: 3, sender: 'client', text: '先週のアドバイスを実践してみて、少し変化が出てきました!', time: '11:00' },
-  ];
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+
+  // メッセージ取得・リアルタイム購読
+  useEffect(() => {
+    if (!session?.user) return;
+    const userId = session.user.id;
+
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+        .order('created_at', { ascending: true });
+      if (data) {
+        setMessages(data.map(m => ({
+          id: m.id,
+          sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
+          text: m.text,
+          time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          sender_id: m.sender_id,
+          receiver_id: m.receiver_id
+        })));
+      }
+    };
+    fetchMessages();
+
+    const channel = supabase
+      .channel('messages-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const m = payload.new;
+        if (m.sender_id === userId || m.receiver_id === userId) {
+          setMessages(prev => [...prev, {
+            id: m.id,
+            sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
+            text: m.text,
+            time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            sender_id: m.sender_id,
+            receiver_id: m.receiver_id
+          }]);
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [session, userType]);
+
+  // メッセージ送信
+  const sendMessage = async (receiverId) => {
+    if (!newMessage.trim() || !session?.user) return;
+    await supabase.from('messages').insert({
+      sender_id: session.user.id,
+      receiver_id: receiverId,
+      text: newMessage.trim()
+    });
+    setNewMessage('');
+  };
 
   // ローディング中
   if (loading) {
@@ -1169,9 +1221,12 @@ const OshiCoachingApp = () => {
                             <input
                               type="text"
                               placeholder="メッセージを入力..."
+                              value={newMessage}
+                              onChange={(e) => setNewMessage(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(selectedClient.id); }}
                               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                             />
-                            <button className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
+                            <button onClick={() => sendMessage(selectedClient.id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
                               送信
                             </button>
                           </div>
@@ -1598,9 +1653,12 @@ const OshiCoachingApp = () => {
                       <input
                         type="text"
                         placeholder="メッセージを入力..."
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && selectedCoach) sendMessage(selectedCoach.user_id || selectedCoach.id); }}
                         className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                       />
-                      <button className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
+                      <button onClick={() => selectedCoach && sendMessage(selectedCoach.user_id || selectedCoach.id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
                         送信
                       </button>
                     </div>
