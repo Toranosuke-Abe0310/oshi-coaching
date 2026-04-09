@@ -221,7 +221,7 @@ const Login = () => {
           <div className="mt-4 pt-4 border-t border-gray-100 text-center">
             <p className="text-xs text-gray-500 mb-2">コーチとして活動したい方</p>
             <a
-              href="https://forms.gle/your-google-form-url"
+              href="https://forms.gle/YpWCmcf2KaLsSeHi8"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-purple-600 hover:text-purple-700 font-medium underline"
