@@ -1337,10 +1337,9 @@ const OshiCoachingApp = () => {
               </div>
             </div>
 
-            <div 
+            <div
               onClick={() => {
                 setClientViewType('mycoach');
-                setSelectedCoach(coaches[0]); // デモ用に最初のコーチを選択
               }}
               className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-transparent hover:border-pink-300"
             >
@@ -1510,12 +1509,18 @@ const OshiCoachingApp = () => {
     );
   }
 
-  // クライアント側 - マイコーチ画面（コーチ側と同じようなUI）
+  // クライアント側 - マイコーチ画面（コーチ未割り当て）
   if (userType === 'client' && !selectedCoach) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 to-white">
         <header className="bg-white border-b border-pink-100 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+            <button
+              onClick={() => setClientViewType(null)}
+              className="text-pink-600 hover:text-pink-700 flex items-center gap-2"
+            >
+              ← 戻る
+            </button>
             <div className="flex items-center gap-3">
               <Heart className="w-8 h-8 text-pink-400" />
               <h1 className="text-xl font-bold text-gray-800">推しコーチング</h1>
@@ -1532,39 +1537,18 @@ const OshiCoachingApp = () => {
           </div>
         </header>
 
-        <div className="max-w-6xl mx-auto px-4 py-8">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">あなたのコーチを選んでください</h2>
-            <p className="text-gray-600">一度選択したコーチとの継続的なサポートが始まります</p>
+        <div className="max-w-md mx-auto px-4 py-20 text-center">
+          <div className="w-20 h-20 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl">
+            🌸
           </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {coaches.map(coach => (
-              <div 
-                key={coach.id}
-                onClick={() => setSelectedCoach(coach)}
-                className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-transparent hover:border-pink-300"
-              >
-                <div className="text-center">
-                  <div className="w-24 h-24 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4 text-5xl">
-                    {coach.image}
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-1">{coach.name}</h3>
-                  <p className="text-sm text-gray-600 mb-2">元{coach.former_group}</p>
-                  <div className="inline-block bg-pink-50 text-pink-600 px-3 py-1 rounded-full text-sm mb-4">
-                    {coach.specialty}
-                  </div>
-                  <div className="text-sm text-gray-600 flex items-center justify-center gap-2">
-                    <Users className="w-4 h-4" />
-                    <span>{coach.clients}名サポート中</span>
-                  </div>
-                </div>
-                <button className="w-full mt-6 bg-pink-500 text-white py-2 rounded-lg hover:bg-pink-600 transition-colors">
-                  このコーチを選ぶ
-                </button>
-              </div>
-            ))}
-          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-3">コーチはまだ割り当てられていません</h2>
+          <p className="text-gray-500 mb-8">運営からコーチが割り当てられるまでしばらくお待ちください。</p>
+          <button
+            onClick={() => setClientViewType(null)}
+            className="px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
+          >
+            トップに戻る
+          </button>
         </div>
       </div>
     );
@@ -1629,50 +1613,8 @@ const OshiCoachingApp = () => {
                   <MessageCircle className="w-5 h-5" />
                   <span>メッセージ</span>
                 </button>
-                <button 
-                  onClick={() => setClientMyCoachTab('schedule')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg ${
-                    clientMyCoachTab === 'schedule' ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <Calendar className="w-5 h-5" />
-                  <span>セッション予約</span>
-                </button>
-                <button 
-                  onClick={() => setClientMyCoachTab('files')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg ${
-                    clientMyCoachTab === 'files' ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <FileText className="w-5 h-5" />
-                  <span>資料・記録</span>
-                </button>
               </div>
 
-              {/* 進捗カード */}
-              <div className="bg-white rounded-xl p-4 shadow-sm mt-4">
-                <h3 className="font-bold text-gray-800 mb-3">あなたの進捗</h3>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">セッション回数</span>
-                      <span className="font-bold text-pink-600">5回</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">開始日</span>
-                      <span className="font-bold text-gray-800">2024/01/15</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">次回セッション</span>
-                      <span className="font-bold text-gray-800">2024/02/01</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* メインコンテンツエリア */}
