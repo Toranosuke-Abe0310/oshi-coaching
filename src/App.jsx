@@ -79,6 +79,26 @@ const OshiCoachingApp = () => {
     fetchCoaches();
   }, []);
 
+  // クライアント側: 承認済み申し込みからコーチを自動取得
+  useEffect(() => {
+    if (userType !== 'client' || !session?.user || coaches.length === 0) return;
+    const fetchAssignedCoach = async () => {
+      const { data } = await supabase
+        .from('applications')
+        .select('coach_id')
+        .eq('client_id', session.user.id)
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data?.coach_id) {
+        const assignedCoach = coaches.find(c => c.user_id === data.coach_id);
+        if (assignedCoach) setSelectedCoach(assignedCoach);
+      }
+    };
+    fetchAssignedCoach();
+  }, [userType, session, coaches]);
+
   // コーチ側: Supabaseからクライアント一覧を取得（user_type='client'のユーザー）
   useEffect(() => {
     if (userType !== 'coach' || !session?.user) return;
@@ -1440,16 +1460,28 @@ const OshiCoachingApp = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 h-32 mb-4"
                   />
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!applicationMessage.trim()) {
                         alert('メッセージを入力してください');
                         return;
                       }
-                      
-                      // 申し込みは管理画面に届く（コーチには直接届かない）
+                      if (!currentCoach?.user_id) {
+                        alert('コーチ情報が取得できませんでした');
+                        return;
+                      }
+                      const { error } = await supabase.from('applications').insert({
+                        client_id: session.user.id,
+                        coach_id: currentCoach.user_id,
+                        message: applicationMessage,
+                        status: 'pending'
+                      });
+                      if (error) {
+                        alert('送信に失敗しました: ' + error.message);
+                        return;
+                      }
                       alert(`${currentCoach.name}さんへの申し込みを送信しました！\n\n運営による承認後、コーチに通知されます。\n承認までしばらくお待ちください。`);
                       setApplicationMessage('');
-                      
+
                       // 次のコーチへ
                       if (currentCoachIndex < coaches.length - 1) {
                         setCurrentCoachIndex(currentCoachIndex + 1);
