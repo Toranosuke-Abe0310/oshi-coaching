@@ -1616,10 +1616,7 @@ const OshiCoachingApp = () => {
         <header className="bg-white border-b border-pink-100 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
             <button
-              onClick={() => {
-                setClientViewType(null);
-                setSelectedCoach(null);
-              }}
+              onClick={() => setClientViewType(null)}
               className="text-pink-600 hover:text-pink-700 flex items-center gap-2"
             >
               ← 戻る
