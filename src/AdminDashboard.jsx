@@ -230,46 +230,42 @@ const AdminDashboard = () => {
     <div className="min-h-screen bg-gray-50">
       {/* ヘッダー */}
       <header className="bg-white border-b border-pink-100 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Shield className="w-8 h-8 text-pink-500" />
-              <div>
-                <h1 className="text-xl font-bold text-gray-800">推しコーチング 管理画面</h1>
-                <p className="text-sm text-gray-600">コーチアカウント管理</p>
-              </div>
+        <div className="max-w-3xl mx-auto px-4 py-4">
+          <div className="flex items-center gap-3">
+            <Shield className="w-7 h-7 text-pink-500 shrink-0" />
+            <div>
+              <h1 className="text-lg font-bold text-gray-800">推しコーチング 管理画面</h1>
+              <p className="text-xs text-gray-500">コーチアカウント管理</p>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-3xl mx-auto px-4 py-4">
         {/* メインタブ */}
-        <div className="mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-2 inline-flex gap-2">
-            <button
-              onClick={() => setMainTab('applications')}
-              className={`px-6 py-3 rounded-lg font-medium transition-colors ${
-                mainTab === 'applications' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              申し込み管理
-            </button>
-            <button
-              onClick={() => setMainTab('createCoach')}
-              className={`px-6 py-3 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                mainTab === 'createCoach' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              コーチ登録
-            </button>
-          </div>
+        <div className="mb-4 flex gap-2">
+          <button
+            onClick={() => setMainTab('applications')}
+            className={`flex-1 py-3 rounded-xl font-medium transition-colors text-sm ${
+              mainTab === 'applications' ? 'bg-pink-500 text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'
+            }`}
+          >
+            申し込み管理
+          </button>
+          <button
+            onClick={() => setMainTab('createCoach')}
+            className={`flex-1 py-3 rounded-xl font-medium transition-colors flex items-center justify-center gap-1.5 text-sm ${
+              mainTab === 'createCoach' ? 'bg-pink-500 text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'
+            }`}
+          >
+            <UserPlus className="w-4 h-4" />
+            コーチ登録
+          </button>
         </div>
 
         {/* コーチ登録フォーム */}
         {mainTab === 'createCoach' && (
-          <div className="max-w-2xl">
+          <div className="w-full">
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
               <h3 className="font-bold text-blue-800 mb-2">📋 コーチ登録の手順</h3>
               <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
@@ -442,25 +438,23 @@ const AdminDashboard = () => {
         {/* 申し込み管理 */}
         {mainTab === 'applications' && (<>
         {/* タブ切り替え */}
-        <div className="mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-2 inline-flex gap-2">
-            <button
-              onClick={() => { setViewType('client'); setSelectedApplication(null); }}
-              className={`px-6 py-3 rounded-lg font-medium transition-colors ${
-                viewType === 'client' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              クライアント申し込み管理
-            </button>
-            <button
-              onClick={() => { setViewType('coaches'); setSelectedApplication(null); }}
-              className={`px-6 py-3 rounded-lg font-medium transition-colors ${
-                viewType === 'coaches' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              コーチアカウント管理
-            </button>
-          </div>
+        <div className="mb-4 flex gap-2">
+          <button
+            onClick={() => { setViewType('client'); setSelectedApplication(null); }}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              viewType === 'client' ? 'bg-pink-500 text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'
+            }`}
+          >
+            申し込み管理
+          </button>
+          <button
+            onClick={() => { setViewType('coaches'); setSelectedApplication(null); }}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              viewType === 'coaches' ? 'bg-pink-500 text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'
+            }`}
+          >
+            コーチ一覧
+          </button>
         </div>
 
         {/* クライアント申し込み管理 */}

@@ -336,11 +336,31 @@ const OshiCoachingApp = () => {
           </div>
         </header>
 
-        <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* モバイル底部ナビゲーション */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-pink-100 z-20 flex">
+          {[
+            { view: 'dashboard', icon: <Users className="w-5 h-5" />, label: 'クライアント' },
+            { view: 'calendar', icon: <Calendar className="w-5 h-5" />, label: 'スケジュール' },
+            { view: 'settings', icon: <Settings className="w-5 h-5" />, label: '設定' },
+          ].map(item => (
+            <button
+              key={item.view}
+              onClick={() => setCurrentView(item.view)}
+              className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium transition-colors ${
+                currentView === item.view ? 'text-pink-600' : 'text-gray-400'
+              }`}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="max-w-7xl mx-auto px-4 py-6 pb-24 lg:pb-6">
           <div className="grid lg:grid-cols-4 gap-6">
-            {/* サイドバー */}
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-xl p-4 shadow-sm">
+            {/* サイドバー（PC専用） */}
+            <div className="hidden lg:block lg:col-span-1">
+              <div className="bg-white rounded-xl p-4 shadow-sm sticky top-20">
                 <nav className="space-y-2">
                   <button
                     onClick={() => setCurrentView('dashboard')}
@@ -1337,39 +1357,42 @@ const OshiCoachingApp = () => {
           </div>
         </header>
 
-        <div className="max-w-4xl mx-auto px-4 py-12">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">ようこそ!</h2>
-            <p className="text-gray-600">どちらをご利用ですか?</p>
+        <div className="max-w-lg mx-auto px-4 py-10">
+          <div className="text-center mb-10">
+            <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Heart className="w-8 h-8 text-pink-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">ようこそ！</h2>
+            <p className="text-gray-500 text-sm">どちらをご利用ですか？</p>
           </div>
-          
-          <div className="grid md:grid-cols-2 gap-6">
-            <div 
+
+          <div className="flex flex-col gap-4">
+            <div
               onClick={() => setClientViewType('search')}
-              className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-transparent hover:border-pink-300"
+              className="bg-white rounded-2xl p-6 shadow-md active:shadow-lg transition-all cursor-pointer border-2 border-transparent hover:border-pink-300 flex items-center gap-5"
             >
-              <div className="text-center">
-                <div className="w-20 h-20 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Search className="w-10 h-10 text-pink-500" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">コーチをお探しの方</h2>
-                <p className="text-gray-600">あなたにぴったりのコーチを見つけましょう</p>
+              <div className="w-14 h-14 bg-pink-100 rounded-full flex items-center justify-center shrink-0">
+                <Search className="w-7 h-7 text-pink-500" />
               </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800 mb-1">コーチをお探しの方</h2>
+                <p className="text-gray-500 text-sm">あなたにぴったりのコーチを見つけましょう</p>
+              </div>
+              <span className="ml-auto text-gray-300 text-lg">›</span>
             </div>
 
             <div
-              onClick={() => {
-                setClientViewType('mycoach');
-              }}
-              className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-transparent hover:border-pink-300"
+              onClick={() => setClientViewType('mycoach')}
+              className="bg-white rounded-2xl p-6 shadow-md active:shadow-lg transition-all cursor-pointer border-2 border-transparent hover:border-pink-300 flex items-center gap-5"
             >
-              <div className="text-center">
-                <div className="w-20 h-20 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Heart className="w-10 h-10 text-pink-500" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">コーチがいる方</h2>
-                <p className="text-gray-600">担当コーチとのやり取りを確認</p>
+              <div className="w-14 h-14 bg-pink-100 rounded-full flex items-center justify-center shrink-0">
+                <Heart className="w-7 h-7 text-pink-500" />
               </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800 mb-1">コーチがいる方</h2>
+                <p className="text-gray-500 text-sm">担当コーチとのやり取りを確認</p>
+              </div>
+              <span className="ml-auto text-gray-300 text-lg">›</span>
             </div>
           </div>
         </div>
@@ -1617,284 +1640,100 @@ const OshiCoachingApp = () => {
           </div>
         </header>
 
-        <div className="max-w-6xl mx-auto px-4 py-6">
+        <div className="max-w-2xl mx-auto px-4 py-4 pb-6">
           {/* コーチ情報カード */}
-          <div className="bg-gradient-to-r from-pink-500 to-pink-400 rounded-2xl p-6 mb-6 text-white shadow-lg">
+          <div className="bg-gradient-to-r from-pink-500 to-pink-400 rounded-2xl p-5 mb-4 text-white shadow-lg">
             <div className="flex items-center gap-4">
-              <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center text-4xl">
+              <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-3xl shrink-0">
                 {selectedCoach.image}
               </div>
               <div>
-                <p className="text-pink-100 text-sm mb-1">あなたのコーチ</p>
-                <h2 className="text-2xl font-bold">{selectedCoach.name}</h2>
-                <p className="text-pink-100">元{selectedCoach.former_group} / {selectedCoach.specialty}</p>
+                <p className="text-pink-100 text-xs mb-0.5">あなたのコーチ</p>
+                <h2 className="text-xl font-bold">{selectedCoach.name}</h2>
+                <p className="text-pink-100 text-sm">元{selectedCoach.former_group} / {selectedCoach.specialty}</p>
               </div>
             </div>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6">
-            {/* メニュー */}
-            <div className="md:col-span-1">
-              <div className="bg-white rounded-xl p-4 shadow-sm space-y-2">
-                <button 
-                  onClick={() => setClientMyCoachTab('messages')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg ${
-                    clientMyCoachTab === 'messages' ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>メッセージ</span>
-                </button>
+          {/* タブ（モバイルではメッセージのみ表示） */}
+          <div className="bg-white rounded-xl shadow-sm mb-4">
+            <div className="flex border-b border-gray-100">
+              <button
+                onClick={() => setClientMyCoachTab('messages')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  clientMyCoachTab === 'messages' ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500'
+                }`}
+              >
+                <MessageCircle className="w-4 h-4" />
+                メッセージ
+              </button>
+            </div>
+          </div>
+
+          {/* メッセージエリア */}
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="flex flex-col h-[60vh] min-h-[400px]">
+              {/* メッセージ一覧 */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {messages
+                  .filter(m => {
+                    const myId = session?.user?.id;
+                    const partnerId = selectedCoach?.user_id;
+                    if (!partnerId) return false;
+                    return (m.sender_id === myId && m.receiver_id === partnerId) ||
+                           (m.sender_id === partnerId && m.receiver_id === myId);
+                  })
+                  .map(msg => (
+                    <div key={msg.id} className={`flex ${msg.sender_id === session?.user?.id ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
+                        msg.sender_id === session?.user?.id
+                          ? 'bg-pink-500 text-white rounded-br-sm'
+                          : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                      }`}>
+                        <p>{msg.text || msg.content}</p>
+                        <p className={`text-xs mt-1 ${msg.sender_id === session?.user?.id ? 'text-pink-100' : 'text-gray-400'}`}>
+                          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'}) : ''}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                {messages.filter(m => {
+                  const myId = session?.user?.id;
+                  const partnerId = selectedCoach?.user_id;
+                  if (!partnerId) return false;
+                  return (m.sender_id === myId && m.receiver_id === partnerId) ||
+                         (m.sender_id === partnerId && m.receiver_id === myId);
+                }).length === 0 && (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-gray-400 text-sm">まだメッセージがありません。最初のメッセージを送ってみましょう！</p>
+                  </div>
+                )}
               </div>
 
-            </div>
-
-            {/* メインコンテンツエリア */}
-            <div className="md:col-span-2">
-              {clientMyCoachTab === 'messages' && (
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-gradient-to-r from-pink-50 to-white p-4 border-b border-pink-100">
-                    <h3 className="font-bold text-gray-800">メッセージ</h3>
-                  </div>
-
-                  <div className="p-6">
-                    <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                      {messages
-                        .filter(m => {
-                          const myId = session?.user?.id;
-                          const partnerId = selectedCoach?.user_id;
-                          if (!partnerId) return false;
-                          return (m.sender_id === myId && m.receiver_id === partnerId) ||
-                                 (m.sender_id === partnerId && m.receiver_id === myId);
-                        })
-                        .map(msg => (
-                        <div key={msg.id} className={`flex ${msg.sender === 'client' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-xs px-4 py-2 rounded-lg ${
-                            msg.sender === 'client'
-                              ? 'bg-pink-500 text-white'
-                              : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            <p>{msg.text}</p>
-                            <p className={`text-xs mt-1 ${msg.sender === 'client' ? 'text-pink-100' : 'text-gray-500'}`}>
-                              {msg.time}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {!selectedCoach?.user_id && (
-                      <p className="text-sm text-red-500 mb-2">コーチ情報が正しく読み込まれていません</p>
-                    )}
-
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="メッセージを入力..."
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && selectedCoach?.user_id) sendMessage(selectedCoach.user_id); }}
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
-                      />
-                      <button onClick={() => selectedCoach?.user_id && sendMessage(selectedCoach.user_id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
-                        送信
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {clientMyCoachTab === 'schedule' && (
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-gradient-to-r from-pink-50 to-white p-4 border-b border-pink-100">
-                    <h3 className="font-bold text-gray-800">セッション予約</h3>
-                  </div>
-
-                  <div className="p-6">
-                    <div className="space-y-4">
-                      {/* 予約済みセッション */}
-                      <div>
-                        <h4 className="font-medium text-gray-700 mb-3">予約済みセッション</h4>
-                        <div className="space-y-3">
-                          <div className="bg-pink-50 p-4 rounded-lg border-l-4 border-pink-400">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-bold text-gray-800">次回セッション</p>
-                                <p className="text-sm text-gray-600 mt-1">2024/02/01 10:00 - 11:00</p>
-                              </div>
-                              <span className="bg-pink-500 text-white px-3 py-1 rounded-full text-xs">
-                                確定
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="bg-gray-50 p-4 rounded-lg border-l-4 border-gray-300">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-medium text-gray-700">前回セッション</p>
-                                <p className="text-sm text-gray-600 mt-1">2024/01/25 14:00 - 15:00</p>
-                              </div>
-                              <span className="bg-gray-400 text-white px-3 py-1 rounded-full text-xs">
-                                完了
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 新規予約リクエスト */}
-                      <div className="border-t border-gray-200 pt-4 mt-6">
-                        <h4 className="font-medium text-gray-700 mb-3">新規予約をリクエスト</h4>
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">希望日</label>
-                            <input 
-                              type="date" 
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">希望時間</label>
-                            <input 
-                              type="time" 
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">メモ（任意）</label>
-                            <textarea 
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 h-20"
-                              placeholder="相談したいことなど..."
-                            />
-                          </div>
-                          <button className="w-full bg-pink-500 text-white py-2 rounded-lg hover:bg-pink-600">
-                            予約リクエストを送信
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {clientMyCoachTab === 'files' && (
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-gradient-to-r from-pink-50 to-white p-4 border-b border-pink-100">
-                    <h3 className="font-bold text-gray-800">資料・記録</h3>
-                  </div>
-
-                  <div className="p-6">
-                    <div className="mb-4">
-                      <button 
-                        onClick={() => clientFileInputRef.current?.click()}
-                        className="w-full bg-pink-500 text-white py-3 rounded-lg hover:bg-pink-600 flex items-center justify-center gap-2"
-                      >
-                        <FileText className="w-5 h-5" />
-                        ファイルをアップロード
-                      </button>
-                      <input
-                        ref={clientFileInputRef}
-                        type="file"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const newFile = {
-                              id: clientFiles.length + 1,
-                              name: file.name,
-                              uploadDate: new Date().toISOString().split('T')[0],
-                              size: file.size < 1024 ? `${file.size}B` : 
-                                    file.size < 1048576 ? `${Math.round(file.size / 1024)}KB` : 
-                                    `${Math.round(file.size / 1048576)}MB`
-                            };
-                            
-                            setClientFiles([...clientFiles, newFile]);
-                            
-                            // 実際のファイルデータを保存
-                            setUploadedFiles({
-                              ...uploadedFiles,
-                              [`client_${newFile.id}`]: file
-                            });
-                            
-                            alert(`${file.name} をアップロードしました`);
-                            e.target.value = ''; // inputをリセット
-                          }
-                        }}
-                        className="hidden"
-                        accept=".xlsx,.xls,.pdf,.doc,.docx,.ppt,.pptx"
-                      />
-                    </div>
-
-                    {/* ファイルリスト */}
-                    {clientFiles.length === 0 ? (
-                      <div className="bg-gray-50 rounded-lg p-12 text-center">
-                        <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                        <p className="text-gray-600">まだファイルがアップロードされていません</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {clientFiles.map(file => (
-                          <div key={file.id} className="bg-white border border-gray-200 rounded-lg p-4 hover:border-pink-300 transition-colors">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
-                                  <FileText className="w-5 h-5 text-pink-600" />
-                                </div>
-                                <div>
-                                  <p className="font-medium text-gray-800">{file.name}</p>
-                                  <p className="text-sm text-gray-600">{file.uploadDate} · {file.size}</p>
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => {
-                                    const fileData = uploadedFiles[`client_${file.id}`];
-                                    if (fileData) {
-                                      const url = URL.createObjectURL(fileData);
-                                      const a = document.createElement('a');
-                                      a.href = url;
-                                      a.download = file.name;
-                                      a.click();
-                                      URL.revokeObjectURL(url);
-                                    } else {
-                                      alert('このファイルはサンプルデータのためダウンロードできません');
-                                    }
-                                  }}
-                                  className="px-3 py-1 text-pink-600 hover:bg-pink-50 rounded-lg text-sm"
-                                >
-                                  ダウンロード
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    if (confirm(`${file.name}を削除しますか？`)) {
-                                      setClientFiles(clientFiles.filter(f => f.id !== file.id));
-                                      
-                                      // アップロードされたファイルデータも削除
-                                      const newUploadedFiles = {...uploadedFiles};
-                                      delete newUploadedFiles[`client_${file.id}`];
-                                      setUploadedFiles(newUploadedFiles);
-                                      
-                                      alert('ファイルを削除しました');
-                                    }
-                                  }}
-                                  className="px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg text-sm"
-                                >
-                                  削除
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-sm text-blue-800">
-                        <strong>対応ファイル形式:</strong> Excel (.xlsx, .xls), PDF (.pdf), Word (.doc, .docx), PowerPoint (.ppt, .pptx)
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* 入力欄 */}
+              <div className="border-t border-gray-100 p-3 flex gap-2">
+                {!selectedCoach?.user_id && (
+                  <p className="text-sm text-red-500 w-full text-center">コーチ情報が正しく読み込まれていません</p>
+                )}
+                {selectedCoach?.user_id && (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="メッセージを入力..."
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(selectedCoach.user_id); }}
+                      className="flex-1 px-4 py-2 bg-gray-100 rounded-full focus:outline-none focus:bg-white focus:ring-2 focus:ring-pink-300 text-sm"
+                    />
+                    <button
+                      onClick={() => sendMessage(selectedCoach.user_id)}
+                      className="px-5 py-2 bg-pink-500 text-white rounded-full hover:bg-pink-600 text-sm font-medium shrink-0"
+                    >
+                      送信
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>
