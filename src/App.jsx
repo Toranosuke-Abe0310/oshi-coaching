@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import Login from './Login'
 import { Heart, MessageCircle, Users, Calendar, FileText, Settings, LogOut, Menu, X, Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -247,20 +247,21 @@ const OshiCoachingApp = () => {
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const seenMessageIds = useRef(new Set());
 
   // メッセージ取得
-  const fetchMessages = async () => {
-    if (!session?.user) return;
-    const userId = session.user.id;
+  const fetchMessages = async (userId) => {
     const { data } = await supabase
       .from('messages')
       .select('*')
       .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
       .order('created_at', { ascending: true });
     if (data) {
+      // 取得済みIDをrefに登録
+      data.forEach(m => seenMessageIds.current.add(m.id));
       setMessages(data.map(m => ({
         id: m.id,
-        sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
+        sender: m.sender_id === userId ? 'me' : 'other',
         text: m.text,
         time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
         sender_id: m.sender_id,
@@ -270,34 +271,36 @@ const OshiCoachingApp = () => {
   };
 
   useEffect(() => {
-    if (!session?.user) return;
-    fetchMessages();
-
+    if (!session?.user?.id) return;
     const userId = session.user.id;
-    const channelName = `messages-${userId}`;
+
+    // 既存IDをリセットして初期取得
+    seenMessageIds.current = new Set();
+    fetchMessages(userId);
+
+    // チャンネル名をユニークにして多重購読を防止
+    const channelName = `msg-${userId}-${Date.now()}`;
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const m = payload.new;
-        // 自分宛 or 自分送信のメッセージだけ追加
         if (m.sender_id !== userId && m.receiver_id !== userId) return;
-        setMessages(prev => {
-          // 重複チェック
-          if (prev.some(msg => msg.id === m.id)) return prev;
-          return [...prev, {
-            id: m.id,
-            sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
-            text: m.text,
-            time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-            sender_id: m.sender_id,
-            receiver_id: m.receiver_id
-          }];
-        });
+        // refで重複チェック（Reactの非同期stateより確実）
+        if (seenMessageIds.current.has(m.id)) return;
+        seenMessageIds.current.add(m.id);
+        setMessages(prev => [...prev, {
+          id: m.id,
+          sender: m.sender_id === userId ? 'me' : 'other',
+          text: m.text,
+          time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          sender_id: m.sender_id,
+          receiver_id: m.receiver_id
+        }]);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [session]);
+  }, [session?.user?.id]);
 
   // メッセージ送信
   const sendMessage = async (receiverId) => {
@@ -1310,14 +1313,14 @@ const OshiCoachingApp = () => {
                                        (m.sender_id === partnerId && m.receiver_id === myId);
                               })
                               .map(msg => (
-                              <div key={msg.id} className={`flex ${msg.sender === 'coach' ? 'justify-end' : 'justify-start'}`}>
+                              <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs px-4 py-2 rounded-lg ${
-                                  msg.sender === 'coach'
+                                  msg.sender === 'me'
                                     ? 'bg-pink-500 text-white'
                                     : 'bg-gray-100 text-gray-800'
                                 }`}>
                                   <p>{msg.text}</p>
-                                  <p className={`text-xs mt-1 ${msg.sender === 'coach' ? 'text-pink-100' : 'text-gray-500'}`}>
+                                  <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-500'}`}>
                                     {msg.time}
                                   </p>
                                 </div>
@@ -1697,15 +1700,15 @@ const OshiCoachingApp = () => {
                            (m.sender_id === partnerId && m.receiver_id === myId);
                   })
                   .map(msg => (
-                    <div key={msg.id} className={`flex ${msg.sender_id === session?.user?.id ? 'justify-end' : 'justify-start'}`}>
+                    <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
-                        msg.sender_id === session?.user?.id
+                        msg.sender === 'me'
                           ? 'bg-pink-500 text-white rounded-br-sm'
                           : 'bg-gray-100 text-gray-800 rounded-bl-sm'
                       }`}>
-                        <p>{msg.text || msg.content}</p>
-                        <p className={`text-xs mt-1 ${msg.sender_id === session?.user?.id ? 'text-pink-100' : 'text-gray-400'}`}>
-                          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'}) : ''}
+                        <p>{msg.text}</p>
+                        <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>
+                          {msg.time}
                         </p>
                       </div>
                     </div>
