@@ -273,15 +273,31 @@ const OshiCoachingApp = () => {
     if (!session?.user) return;
     fetchMessages();
 
+    const userId = session.user.id;
+    const channelName = `messages-${userId}`;
     const channel = supabase
-      .channel('messages-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-        fetchMessages();
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const m = payload.new;
+        // 自分宛 or 自分送信のメッセージだけ追加
+        if (m.sender_id !== userId && m.receiver_id !== userId) return;
+        setMessages(prev => {
+          // 重複チェック
+          if (prev.some(msg => msg.id === m.id)) return prev;
+          return [...prev, {
+            id: m.id,
+            sender: m.sender_id === userId ? (userType === 'coach' ? 'coach' : 'client') : (userType === 'coach' ? 'client' : 'coach'),
+            text: m.text,
+            time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            sender_id: m.sender_id,
+            receiver_id: m.receiver_id
+          }];
+        });
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [session, userType]);
+  }, [session]);
 
   // メッセージ送信
   const sendMessage = async (receiverId) => {
