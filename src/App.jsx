@@ -318,19 +318,19 @@ const OshiCoachingApp = () => {
       <div className="min-h-screen bg-gray-50">
         {/* ヘッダー */}
         <header className="bg-white border-b border-pink-100 sticky top-0 z-10">
-          <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Heart className="w-8 h-8 text-pink-400" />
-              <h1 className="text-xl font-bold text-gray-800">推しコーチング - コーチ</h1>
+              <Heart className="w-7 h-7 text-pink-400" />
+              <h1 className="text-lg font-bold text-gray-800">推しコーチング</h1>
             </div>
             <button
               onClick={async () => {
                 await supabase.auth.signOut()
                 window.location.reload()
               }}
-              className="flex items-center gap-2 text-gray-600 hover:text-pink-500"
+              className="flex items-center gap-2 text-gray-500 hover:text-pink-500 text-sm"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">ログアウト</span>
             </button>
           </div>
@@ -356,7 +356,7 @@ const OshiCoachingApp = () => {
           ))}
         </nav>
 
-        <div className="max-w-7xl mx-auto px-4 py-6 pb-24 lg:pb-6">
+        <div className="max-w-5xl mx-auto px-4 py-6 pb-24 lg:pb-6">
           <div className="grid lg:grid-cols-4 gap-6">
             {/* サイドバー（PC専用） */}
             <div className="hidden lg:block lg:col-span-1">
