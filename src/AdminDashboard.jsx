@@ -89,11 +89,27 @@ const AdminDashboard = () => {
 
   // コーチ一覧をSupabaseから取得
   const fetchCoaches = async () => {
-    const { data, error } = await supabase
+    const { data: coachData, error } = await supabase
       .from('coaches')
-      .select('*, users:user_id (name, email)')
-      .order('created_at', { ascending: false });
-    if (!error && data) setCoaches(data);
+      .select('*');
+    if (error || !coachData) return;
+
+    // usersテーブルからメールを別途取得
+    const userIds = coachData.map(c => c.user_id).filter(Boolean);
+    let usersMap = {};
+    if (userIds.length > 0) {
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .in('id', userIds);
+      (usersData || []).forEach(u => { usersMap[u.id] = u; });
+    }
+
+    setCoaches(coachData.map(c => ({
+      ...c,
+      userEmail: usersMap[c.user_id]?.email || '',
+      userName: usersMap[c.user_id]?.name || ''
+    })));
   };
 
   useEffect(() => {
@@ -695,10 +711,10 @@ const AdminDashboard = () => {
                       {coach.specialty && (
                         <p className="text-sm text-gray-600">専門: {coach.specialty}</p>
                       )}
-                      {coach.users?.email && (
+                      {coach.userEmail && (
                         <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
                           <Mail className="w-3 h-3" />
-                          <span>{coach.users.email}</span>
+                          <span>{coach.userEmail}</span>
                         </div>
                       )}
                     </div>
