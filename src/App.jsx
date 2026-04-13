@@ -962,11 +962,27 @@ const OshiCoachingApp = () => {
 
                               // クライアントにチャットで予定を通知
                               const msgText = `【セッション予約のお知らせ】\n種類: ${newSchedule.type}\n日時: ${newSchedule.date} ${newSchedule.time}\n所要時間: ${newSchedule.duration}\nよろしくお願いします！`;
-                              await supabase.from('messages').insert({
-                                sender_id: session.user.id,
-                                receiver_id: newSchedule.clientId,
-                                text: msgText
-                              });
+                              const { data: sentMsg, error: msgError } = await supabase
+                                .from('messages')
+                                .insert({
+                                  sender_id: session.user.id,
+                                  receiver_id: newSchedule.clientId,
+                                  text: msgText
+                                })
+                                .select()
+                                .single();
+                              // コーチ側のチャットにも即時反映
+                              if (!msgError && sentMsg) {
+                                seenMessageIds.current.add(sentMsg.id);
+                                setMessages(prev => [...prev, {
+                                  id: sentMsg.id,
+                                  sender: 'me',
+                                  text: sentMsg.text,
+                                  time: new Date(sentMsg.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                                  sender_id: sentMsg.sender_id,
+                                  receiver_id: sentMsg.receiver_id
+                                }]);
+                              }
 
                               setShowAddScheduleModal(false);
                               setNewSchedule({
