@@ -99,17 +99,28 @@ const OshiCoachingApp = () => {
     fetchAssignedCoach();
   }, [userType, session, coaches]);
 
-  // コーチ側: Supabaseからクライアント一覧を取得（user_type='client'のユーザー）
+  // コーチ側: 承認済みクライアントのみ取得
   useEffect(() => {
     if (userType !== 'coach' || !session?.user) return;
     const fetchClients = async () => {
-      const { data } = await supabase
+      // このコーチへの承認済み申込を取得
+      const { data: apps } = await supabase
+        .from('applications')
+        .select('client_id')
+        .eq('coach_id', session.user.id)
+        .eq('status', 'approved');
+      if (!apps || apps.length === 0) {
+        setRealClients([]);
+        return;
+      }
+      const clientIds = apps.map(a => a.client_id);
+      const { data: users } = await supabase
         .from('users')
         .select('id, name, email, created_at')
-        .eq('user_type', 'client');
-      if (data && data.length > 0) {
-        setRealClients(data.map(u => ({
-          id: u.id, // 実際のSupabase UUID
+        .in('id', clientIds);
+      if (users) {
+        setRealClients(users.map(u => ({
+          id: u.id,
           name: u.name || u.email || '名前未設定',
           joinDate: u.created_at?.split('T')[0] || '-',
           sessions: 0,
@@ -155,11 +166,7 @@ const OshiCoachingApp = () => {
   const [clientDetailView, setClientDetailView] = useState('overview'); // 'overview', 'files', 'sessions'
   
   // スケジュール管理用のstate
-  const [scheduleEvents, setScheduleEvents] = useState([
-    { id: 1, clientId: 1, clientName: '佐藤太郎', date: '2024-01-30', time: '14:00', duration: '60分', type: 'セッション' },
-    { id: 2, clientId: 2, clientName: '鈴木花子', date: '2024-02-01', time: '10:00', duration: '60分', type: 'セッション' },
-    { id: 3, clientId: 3, clientName: '高橋健太', date: '2024-01-29', time: '16:00', duration: '60分', type: 'セッション' },
-  ]);
+  const [scheduleEvents, setScheduleEvents] = useState([]);
   const [showAddScheduleModal, setShowAddScheduleModal] = useState(false);
   const [newSchedule, setNewSchedule] = useState({
     clientId: '',
@@ -858,7 +865,7 @@ const OshiCoachingApp = () => {
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                             >
                               <option value="">選択してください</option>
-                              {clients.map(client => (
+                              {realClients.map(client => (
                                 <option key={client.id} value={client.id}>{client.name}</option>
                               ))}
                             </select>
@@ -928,11 +935,11 @@ const OshiCoachingApp = () => {
                                 return;
                               }
                               
-                              const client = clients.find(c => c.id === parseInt(newSchedule.clientId));
+                              const client = realClients.find(c => c.id === newSchedule.clientId);
                               const newEvent = {
                                 id: scheduleEvents.length + 1,
-                                clientId: parseInt(newSchedule.clientId),
-                                clientName: client.name,
+                                clientId: newSchedule.clientId,
+                                clientName: client?.name || '不明',
                                 date: newSchedule.date,
                                 time: newSchedule.time,
                                 duration: newSchedule.duration,
