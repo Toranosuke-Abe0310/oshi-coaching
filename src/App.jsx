@@ -173,7 +173,7 @@ const OshiCoachingApp = () => {
     date: '',
     time: '',
     duration: '60分',
-    type: 'セッション'
+    type: 'コーチング'
   });
   
   // ファイルアップロード用のstate
@@ -920,22 +920,23 @@ const OshiCoachingApp = () => {
                               onChange={(e) => setNewSchedule({...newSchedule, type: e.target.value})}
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                             >
-                              <option value="セッション">セッション</option>
-                              <option value="相談">相談</option>
-                              <option value="フォローアップ">フォローアップ</option>
+                              <option value="お試し">お試し</option>
+                              <option value="初回">初回</option>
+                              <option value="コーチング">コーチング</option>
                             </select>
                           </div>
                         </div>
 
                         <div className="flex gap-3 mt-6">
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               if (!newSchedule.clientId || !newSchedule.date || !newSchedule.time) {
                                 alert('すべての項目を入力してください');
                                 return;
                               }
-                              
+
                               const client = realClients.find(c => c.id === newSchedule.clientId);
+                              const nextSessionStr = `${newSchedule.date} ${newSchedule.time}`;
                               const newEvent = {
                                 id: scheduleEvents.length + 1,
                                 clientId: newSchedule.clientId,
@@ -945,17 +946,37 @@ const OshiCoachingApp = () => {
                                 duration: newSchedule.duration,
                                 type: newSchedule.type
                               };
-                              
-                              setScheduleEvents([...scheduleEvents, newEvent]);
+
+                              // スケジュールに追加
+                              setScheduleEvents(prev => [...prev, newEvent]);
+
+                              // クライアント一覧の次回セッションを更新
+                              setRealClients(prev => prev.map(c =>
+                                c.id === newSchedule.clientId
+                                  ? { ...c, nextSession: nextSessionStr }
+                                  : c
+                              ));
+                              if (selectedClient?.id === newSchedule.clientId) {
+                                setSelectedClient(prev => ({ ...prev, nextSession: nextSessionStr }));
+                              }
+
+                              // クライアントにチャットで予定を通知
+                              const msgText = `【セッション予約のお知らせ】\n種類: ${newSchedule.type}\n日時: ${newSchedule.date} ${newSchedule.time}\n所要時間: ${newSchedule.duration}\nよろしくお願いします！`;
+                              await supabase.from('messages').insert({
+                                sender_id: session.user.id,
+                                receiver_id: newSchedule.clientId,
+                                text: msgText
+                              });
+
                               setShowAddScheduleModal(false);
                               setNewSchedule({
                                 clientId: '',
                                 date: '',
                                 time: '',
                                 duration: '60分',
-                                type: 'セッション'
+                                type: 'コーチング'
                               });
-                              alert('予定を追加しました');
+                              alert(`予定を追加し、${client?.name || 'クライアント'}にチャットで通知しました`);
                             }}
                             className="flex-1 bg-pink-500 text-white py-2 rounded-lg hover:bg-pink-600"
                           >
@@ -969,7 +990,7 @@ const OshiCoachingApp = () => {
                                 date: '',
                                 time: '',
                                 duration: '60分',
-                                type: 'セッション'
+                                type: 'コーチング'
                               });
                             }}
                             className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300"
@@ -999,11 +1020,18 @@ const OshiCoachingApp = () => {
 
                   <div className="grid gap-4">
                     {realClients.map(client => (
-                      <div 
+                      <div
                         key={client.id}
-                        onClick={() => {
+                        onClick={async () => {
                           setSelectedClient(client);
-                          setMemoText(client.memo);
+                          // Supabaseからメモを読み込む
+                          const { data: memoData } = await supabase
+                            .from('coach_memos')
+                            .select('memo')
+                            .eq('coach_id', session.user.id)
+                            .eq('client_id', client.id)
+                            .single();
+                          setMemoText(memoData?.memo || client.memo || '');
                         }}
                         className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-100 hover:border-pink-200"
                       >
@@ -1131,9 +1159,19 @@ const OshiCoachingApp = () => {
                               ) : (
                                 <div className="flex gap-2">
                                   <button
-                                    onClick={() => {
-                                      // 保存処理
+                                    onClick={async () => {
+                                      // stateを更新（selectedClient + realClients）
+                                      const updatedClient = { ...selectedClient, memo: memoText };
+                                      setSelectedClient(updatedClient);
+                                      setRealClients(prev => prev.map(c => c.id === selectedClient.id ? updatedClient : c));
                                       setEditingMemo(false);
+                                      // Supabaseに保存
+                                      await supabase.from('coach_memos').upsert({
+                                        coach_id: session.user.id,
+                                        client_id: selectedClient.id,
+                                        memo: memoText,
+                                        updated_at: new Date().toISOString()
+                                      }, { onConflict: 'coach_id,client_id' });
                                       alert('メモを保存しました');
                                     }}
                                     className="px-4 py-1 bg-pink-500 text-white rounded-lg hover:bg-pink-600 text-sm"
