@@ -99,6 +99,28 @@ const OshiCoachingApp = () => {
     fetchAssignedCoach();
   }, [userType, session, coaches]);
 
+  // クライアント側: コーチから共有されたファイルを取得
+  useEffect(() => {
+    if (userType !== 'client' || !session?.user) return;
+    const fetchClientFiles = async () => {
+      const { data } = await supabase
+        .from('files')
+        .select('*')
+        .eq('client_id', session.user.id)
+        .order('created_at', { ascending: false });
+      if (data) {
+        setClientFiles(data.map(f => ({
+          id: f.id,
+          name: f.file_name,
+          uploadDate: f.created_at?.split('T')[0],
+          size: f.file_size,
+          path: f.file_path
+        })));
+      }
+    };
+    fetchClientFiles();
+  }, [userType, session]);
+
   // コーチ側: 承認済みクライアントのみ取得
   useEffect(() => {
     if (userType !== 'coach' || !session?.user) return;
@@ -239,10 +261,7 @@ const OshiCoachingApp = () => {
   const [currentCoachIndex, setCurrentCoachIndex] = useState(0);
   const [applicationMessage, setApplicationMessage] = useState('');
   const [clientMyCoachTab, setClientMyCoachTab] = useState('messages'); // 'messages', 'schedule', 'files'
-  const [clientFiles, setClientFiles] = useState([
-    { id: 1, name: '目標シート.xlsx', uploadDate: '2024-01-20', size: '45KB' },
-    { id: 2, name: 'セッション記録_1月.pdf', uploadDate: '2024-01-25', size: '128KB' }
-  ]);
+  const [clientFiles, setClientFiles] = useState([]);
 
 
   const clients = [
@@ -1141,14 +1160,25 @@ const OshiCoachingApp = () => {
                         key={client.id}
                         onClick={async () => {
                           setSelectedClient(client);
-                          // Supabaseからメモを読み込む
-                          const { data: memoData } = await supabase
-                            .from('coach_memos')
-                            .select('memo')
-                            .eq('coach_id', session.user.id)
-                            .eq('client_id', client.id)
-                            .single();
-                          setMemoText(memoData?.memo || client.memo || '');
+                          // メモとファイルを並行取得
+                          const [{ data: memoData }, { data: filesData }] = await Promise.all([
+                            supabase.from('coach_memos').select('memo')
+                              .eq('coach_id', session.user.id).eq('client_id', client.id).single(),
+                            supabase.from('files').select('*')
+                              .eq('coach_id', session.user.id).eq('client_id', client.id)
+                              .order('created_at', { ascending: false })
+                          ]);
+                          setMemoText(memoData?.memo || '');
+                          setSelectedClient({
+                            ...client,
+                            files: (filesData || []).map(f => ({
+                              id: f.id,
+                              name: f.file_name,
+                              uploadDate: f.created_at?.split('T')[0],
+                              size: f.file_size,
+                              path: f.file_path
+                            }))
+                          });
                         }}
                         className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-100 hover:border-pink-200"
                       >
@@ -1360,34 +1390,35 @@ const OshiCoachingApp = () => {
                             <input
                               ref={fileInputRef}
                               type="file"
-                              onChange={(e) => {
+                              onChange={async (e) => {
                                 const file = e.target.files?.[0];
-                                if (file) {
-                                  const newFile = {
-                                    id: selectedClient.files.length + 1,
-                                    name: file.name,
-                                    uploadDate: new Date().toISOString().split('T')[0],
-                                    size: file.size < 1024 ? `${file.size}B` : 
-                                          file.size < 1048576 ? `${Math.round(file.size / 1024)}KB` : 
-                                          `${Math.round(file.size / 1048576)}MB`
-                                  };
-                                  
-                                  // クライアントのファイルリストを更新
-                                  const updatedClient = {
-                                    ...selectedClient,
-                                    files: [...selectedClient.files, newFile]
-                                  };
-                                  setSelectedClient(updatedClient);
-                                  
-                                  // 実際のファイルデータを保存（デモ用）
-                                  setUploadedFiles({
-                                    ...uploadedFiles,
-                                    [newFile.id]: file
-                                  });
-                                  
-                                  alert(`${file.name} をアップロードしました`);
-                                  e.target.value = ''; // inputをリセット
+                                if (!file) return;
+                                const fileSize = file.size < 1024 ? `${file.size}B` :
+                                  file.size < 1048576 ? `${Math.round(file.size / 1024)}KB` :
+                                  `${Math.round(file.size / 1048576)}MB`;
+                                const filePath = `${session.user.id}/${selectedClient.id}/${Date.now()}-${file.name}`;
+                                // Supabase Storageにアップロード
+                                const { error: uploadError } = await supabase.storage
+                                  .from('coach-files').upload(filePath, file);
+                                if (uploadError) {
+                                  alert('アップロードに失敗しました: ' + uploadError.message);
+                                  return;
                                 }
+                                // DBにメタデータ保存
+                                const { data: fileRecord, error: dbError } = await supabase
+                                  .from('files').insert({
+                                    coach_id: session.user.id,
+                                    client_id: selectedClient.id,
+                                    file_name: file.name,
+                                    file_path: filePath,
+                                    file_size: fileSize
+                                  }).select().single();
+                                if (!dbError && fileRecord) {
+                                  const newFile = { id: fileRecord.id, name: fileRecord.file_name, uploadDate: fileRecord.created_at?.split('T')[0], size: fileRecord.file_size, path: fileRecord.file_path };
+                                  setSelectedClient(prev => ({ ...prev, files: [newFile, ...prev.files] }));
+                                  alert(`${file.name} をアップロードしました。クライアントが確認できます。`);
+                                }
+                                e.target.value = '';
                               }}
                               className="hidden"
                               accept=".xlsx,.xls,.pdf,.doc,.docx,.ppt,.pptx"
@@ -1419,19 +1450,11 @@ const OshiCoachingApp = () => {
                                       </div>
                                     </div>
                                     <div className="flex gap-2">
-                                      <button 
+                                      <button
                                         onClick={() => {
-                                          const fileData = uploadedFiles[file.id];
-                                          if (fileData) {
-                                            // 実際のファイルをダウンロード
-                                            const url = URL.createObjectURL(fileData);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = file.name;
-                                            a.click();
-                                            URL.revokeObjectURL(url);
-                                          } else {
-                                            alert('このファイルはサンプルデータのためダウンロードできません');
+                                          if (file.path) {
+                                            const { data } = supabase.storage.from('coach-files').getPublicUrl(file.path);
+                                            window.open(data.publicUrl, '_blank');
                                           }
                                         }}
                                         className="px-3 py-1 text-pink-600 hover:bg-pink-50 rounded-lg text-sm"
@@ -1439,20 +1462,13 @@ const OshiCoachingApp = () => {
                                         ダウンロード
                                       </button>
                                       <button 
-                                        onClick={() => {
+                                        onClick={async () => {
                                           if (confirm(`${file.name}を削除しますか？`)) {
-                                            const updatedClient = {
-                                              ...selectedClient,
-                                              files: selectedClient.files.filter(f => f.id !== file.id)
-                                            };
-                                            setSelectedClient(updatedClient);
-                                            
-                                            // アップロードされたファイルデータも削除
-                                            const newUploadedFiles = {...uploadedFiles};
-                                            delete newUploadedFiles[file.id];
-                                            setUploadedFiles(newUploadedFiles);
-                                            
-                                            alert('ファイルを削除しました');
+                                            if (file.path) {
+                                              await supabase.storage.from('coach-files').remove([file.path]);
+                                            }
+                                            await supabase.from('files').delete().eq('id', file.id);
+                                            setSelectedClient(prev => ({ ...prev, files: prev.files.filter(f => f.id !== file.id) }));
                                           }
                                         }}
                                         className="px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg text-sm"
@@ -1857,11 +1873,60 @@ const OshiCoachingApp = () => {
                 <MessageCircle className="w-4 h-4" />
                 メッセージ
               </button>
+              <button
+                onClick={() => setClientMyCoachTab('files')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  clientMyCoachTab === 'files' ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                ファイル ({clientFiles.length})
+              </button>
             </div>
           </div>
 
+          {/* ファイルエリア */}
+          {clientMyCoachTab === 'files' && (
+            <div className="bg-white rounded-xl shadow-sm p-4">
+              <h3 className="text-lg font-bold text-gray-800 mb-4">コーチから共有されたファイル</h3>
+              {clientFiles.length === 0 ? (
+                <div className="text-center py-12">
+                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">まだファイルが共有されていません</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {clientFiles.map(file => (
+                    <div key={file.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-4 border border-gray-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-pink-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-800 text-sm">{file.name}</p>
+                          <p className="text-xs text-gray-500">{file.uploadDate} · {file.size}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (file.path) {
+                            const { data } = supabase.storage.from('coach-files').getPublicUrl(file.path);
+                            window.open(data.publicUrl, '_blank');
+                          }
+                        }}
+                        className="px-4 py-1.5 bg-pink-500 text-white rounded-lg hover:bg-pink-600 text-sm"
+                      >
+                        開く
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* メッセージエリア */}
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ display: clientMyCoachTab === 'files' ? 'none' : 'block' }}>
             <div className="flex flex-col h-[60vh] min-h-[400px]">
               {/* メッセージ一覧（最新が上） */}
               <div className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-3">
