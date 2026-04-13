@@ -114,18 +114,31 @@ const OshiCoachingApp = () => {
         return;
       }
       const clientIds = apps.map(a => a.client_id);
-      const { data: users } = await supabase
-        .from('users')
-        .select('id, name, email, created_at')
-        .in('id', clientIds);
+      const [{ data: users }, { data: schedules }] = await Promise.all([
+        supabase.from('users').select('id, name, email, created_at').in('id', clientIds),
+        supabase.from('schedules')
+          .select('client_id, date, time')
+          .eq('coach_id', session.user.id)
+          .gte('date', new Date().toISOString().split('T')[0])
+          .order('date', { ascending: true })
+      ]);
       if (users) {
+        // クライアントごとに最近の次回セッションをマップ
+        const nextSessionMap = {};
+        if (schedules) {
+          schedules.forEach(s => {
+            if (!nextSessionMap[s.client_id]) {
+              nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
+            }
+          });
+        }
         setRealClients(users.map(u => ({
           id: u.id,
           name: u.name || u.email || '名前未設定',
           joinDate: u.created_at?.split('T')[0] || '-',
           sessions: 0,
           lastMessage: '-',
-          nextSession: '-',
+          nextSession: nextSessionMap[u.id] || '-',
           memo: '',
           files: []
         })));
@@ -1464,7 +1477,7 @@ const OshiCoachingApp = () => {
                       {clientDetailView === 'sessions' && (
                         <div>
                           <h3 className="text-lg font-bold text-gray-800 mb-4">メッセージ</h3>
-                          <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
+                          <div className="flex flex-col-reverse gap-4 mb-4 max-h-96 overflow-y-auto">
                             {messages
                               .filter(m => {
                                 const myId = session?.user?.id;
@@ -1472,6 +1485,7 @@ const OshiCoachingApp = () => {
                                 return (m.sender_id === myId && m.receiver_id === partnerId) ||
                                        (m.sender_id === partnerId && m.receiver_id === myId);
                               })
+                              .slice().reverse()
                               .map(msg => (
                               <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs px-4 py-2 rounded-lg ${
@@ -1849,8 +1863,8 @@ const OshiCoachingApp = () => {
           {/* メッセージエリア */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">
             <div className="flex flex-col h-[60vh] min-h-[400px]">
-              {/* メッセージ一覧 */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {/* メッセージ一覧（最新が上） */}
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-3">
                 {messages
                   .filter(m => {
                     const myId = session?.user?.id;
@@ -1859,6 +1873,7 @@ const OshiCoachingApp = () => {
                     return (m.sender_id === myId && m.receiver_id === partnerId) ||
                            (m.sender_id === partnerId && m.receiver_id === myId);
                   })
+                  .slice().reverse()
                   .map(msg => (
                     <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
