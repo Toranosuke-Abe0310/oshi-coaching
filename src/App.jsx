@@ -134,6 +134,30 @@ const OshiCoachingApp = () => {
     fetchClients();
   }, [userType, session]);
 
+  // コーチ側: Supabaseからスケジュール取得
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user) return;
+    const fetchSchedules = async () => {
+      const { data } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('coach_id', session.user.id)
+        .order('date', { ascending: true });
+      if (data) {
+        setScheduleEvents(data.map(s => ({
+          id: s.id,
+          clientId: s.client_id,
+          clientName: s.client_name,
+          date: s.date,
+          time: s.time,
+          duration: s.duration,
+          type: s.type
+        })));
+      }
+    };
+    fetchSchedules();
+  }, [userType, session]);
+
   // コーチ側: 自分のコーチプロフィールをcoachesテーブルから取得して初期化
   useEffect(() => {
     if (userType !== 'coach' || !session?.user) return;
@@ -819,9 +843,10 @@ const OshiCoachingApp = () => {
                               </div>
                               <div className="flex gap-2">
                                 <button
-                                  onClick={() => {
+                                  onClick={async () => {
                                     if (confirm('この予定を削除しますか?')) {
-                                      setScheduleEvents(scheduleEvents.filter(e => e.id !== event.id));
+                                      await supabase.from('schedules').delete().eq('id', event.id);
+                                      setScheduleEvents(prev => prev.filter(e => e.id !== event.id));
                                     }
                                   }}
                                   className="px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg text-sm"
@@ -937,17 +962,37 @@ const OshiCoachingApp = () => {
 
                               const client = realClients.find(c => c.id === newSchedule.clientId);
                               const nextSessionStr = `${newSchedule.date} ${newSchedule.time}`;
-                              const newEvent = {
-                                id: scheduleEvents.length + 1,
-                                clientId: newSchedule.clientId,
-                                clientName: client?.name || '不明',
-                                date: newSchedule.date,
-                                time: newSchedule.time,
-                                duration: newSchedule.duration,
-                                type: newSchedule.type
-                              };
 
-                              // スケジュールに追加
+                              // Supabaseに保存
+                              const { data: savedSchedule, error: schedErr } = await supabase
+                                .from('schedules')
+                                .insert({
+                                  coach_id: session.user.id,
+                                  client_id: newSchedule.clientId,
+                                  client_name: client?.name || '不明',
+                                  date: newSchedule.date,
+                                  time: newSchedule.time,
+                                  duration: newSchedule.duration,
+                                  type: newSchedule.type
+                                })
+                                .select()
+                                .single();
+
+                              if (schedErr) {
+                                alert('予定の保存に失敗しました');
+                                return;
+                              }
+
+                              // stateに追加（SupabaseのUUIDを使用）
+                              const newEvent = {
+                                id: savedSchedule.id,
+                                clientId: savedSchedule.client_id,
+                                clientName: savedSchedule.client_name,
+                                date: savedSchedule.date,
+                                time: savedSchedule.time,
+                                duration: savedSchedule.duration,
+                                type: savedSchedule.type
+                              };
                               setScheduleEvents(prev => [...prev, newEvent]);
 
                               // クライアント一覧の次回セッションを更新
