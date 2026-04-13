@@ -1345,7 +1345,7 @@ const OshiCoachingApp = () => {
                               placeholder="メッセージを入力..."
                               value={newMessage}
                               onChange={(e) => setNewMessage(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(selectedClient.id); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendMessage(selectedClient.id); }}
                               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                             />
                             <button onClick={() => sendMessage(selectedClient.id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
@@ -1749,7 +1749,7 @@ const OshiCoachingApp = () => {
                       placeholder="メッセージを入力..."
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(selectedCoach.user_id); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendMessage(selectedCoach.user_id); }}
                       className="flex-1 px-4 py-2 bg-gray-100 rounded-full focus:outline-none focus:bg-white focus:ring-2 focus:ring-pink-300 text-sm"
                     />
                     <button
