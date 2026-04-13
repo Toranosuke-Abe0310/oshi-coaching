@@ -302,16 +302,27 @@ const OshiCoachingApp = () => {
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id]);
 
-  // メッセージ送信
+  // メッセージ送信（送信後すぐにstateに追加して二重表示を防ぐ）
   const sendMessage = async (receiverId) => {
     if (!newMessage.trim() || !session?.user) return;
     const msg = newMessage.trim();
     setNewMessage('');
-    await supabase.from('messages').insert({
-      sender_id: session.user.id,
-      receiver_id: receiverId,
-      text: msg
-    });
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender_id: session.user.id, receiver_id: receiverId, text: msg })
+      .select()
+      .single();
+    if (!error && data) {
+      seenMessageIds.current.add(data.id); // リアルタイムで重複しないようIDを登録
+      setMessages(prev => [...prev, {
+        id: data.id,
+        sender: 'me',
+        text: data.text,
+        time: new Date(data.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        sender_id: data.sender_id,
+        receiver_id: data.receiver_id
+      }]);
+    }
   };
 
   // ローディング中
