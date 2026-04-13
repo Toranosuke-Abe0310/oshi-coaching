@@ -197,7 +197,8 @@ const OshiCoachingApp = () => {
     date: '',
     time: '',
     duration: '60分',
-    type: 'コーチング'
+    type: 'コーチング',
+    url: ''
   });
   
   // ファイルアップロード用のstate
@@ -332,6 +333,31 @@ const OshiCoachingApp = () => {
 
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id]);
+
+  // メッセージ内のURLをリンクに変換して表示
+  const renderMessageText = (text, isMine) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+    return (
+      <span className="whitespace-pre-wrap">
+        {parts.map((part, i) =>
+          urlRegex.test(part) ? (
+            <a
+              key={i}
+              href={part}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`underline break-all ${isMine ? 'text-pink-100' : 'text-blue-600'}`}
+            >
+              {part}
+            </a>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </span>
+    );
+  };
 
   // メッセージ送信（送信後すぐにstateに追加して二重表示を防ぐ）
   const sendMessage = async (receiverId) => {
@@ -950,6 +976,19 @@ const OshiCoachingApp = () => {
                               <option value="コーチング">コーチング</option>
                             </select>
                           </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              URL（任意）
+                            </label>
+                            <input
+                              type="url"
+                              value={newSchedule.url}
+                              onChange={(e) => setNewSchedule({...newSchedule, url: e.target.value})}
+                              placeholder="https://zoom.us/j/..."
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                            />
+                          </div>
                         </div>
 
                         <div className="flex gap-3 mt-6">
@@ -973,7 +1012,8 @@ const OshiCoachingApp = () => {
                                   date: newSchedule.date,
                                   time: newSchedule.time,
                                   duration: newSchedule.duration,
-                                  type: newSchedule.type
+                                  type: newSchedule.type,
+                                  url: newSchedule.url || null
                                 })
                                 .select()
                                 .single();
@@ -1006,7 +1046,8 @@ const OshiCoachingApp = () => {
                               }
 
                               // クライアントにチャットで予定を通知
-                              const msgText = `【セッション予約のお知らせ】\n種類: ${newSchedule.type}\n日時: ${newSchedule.date} ${newSchedule.time}\n所要時間: ${newSchedule.duration}\nよろしくお願いします！`;
+                              const urlLine = newSchedule.url ? `\nURL: ${newSchedule.url}` : '';
+                              const msgText = `【セッション予約のお知らせ】\n種類: ${newSchedule.type}\n日時: ${newSchedule.date} ${newSchedule.time}\n所要時間: ${newSchedule.duration}${urlLine}\nよろしくお願いします！`;
                               const { data: sentMsg, error: msgError } = await supabase
                                 .from('messages')
                                 .insert({
@@ -1035,7 +1076,8 @@ const OshiCoachingApp = () => {
                                 date: '',
                                 time: '',
                                 duration: '60分',
-                                type: 'コーチング'
+                                type: 'コーチング',
+                                url: ''
                               });
                               alert(`予定を追加し、${client?.name || 'クライアント'}にチャットで通知しました`);
                             }}
@@ -1051,7 +1093,8 @@ const OshiCoachingApp = () => {
                                 date: '',
                                 time: '',
                                 duration: '60分',
-                                type: 'コーチング'
+                                type: 'コーチング',
+                                url: ''
                               });
                             }}
                             className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300"
@@ -1436,7 +1479,7 @@ const OshiCoachingApp = () => {
                                     ? 'bg-pink-500 text-white'
                                     : 'bg-gray-100 text-gray-800'
                                 }`}>
-                                  <p>{msg.text}</p>
+                                  <p>{renderMessageText(msg.text, msg.sender === 'me')}</p>
                                   <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-500'}`}>
                                     {msg.time}
                                   </p>
@@ -1823,7 +1866,7 @@ const OshiCoachingApp = () => {
                           ? 'bg-pink-500 text-white rounded-br-sm'
                           : 'bg-gray-100 text-gray-800 rounded-bl-sm'
                       }`}>
-                        <p>{msg.text}</p>
+                        <p>{renderMessageText(msg.text, msg.sender === 'me')}</p>
                         <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>
                           {msg.time}
                         </p>
