@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Check, X, Search, Mail, Users, Calendar, UserPlus } from 'lucide-react';
+import { Shield, Check, X, Search, Mail, Users, Calendar, UserPlus, LogOut, Lock } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const AdminDashboard = () => {
+  // 認証関連
+  const [adminSession, setAdminSession] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(true);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
   const [currentView, setCurrentView] = useState('pending'); // 'pending', 'approved', 'rejected'
   const [viewType, setViewType] = useState('client'); // 'client' or 'coaches'
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,10 +129,65 @@ const AdminDashboard = () => {
     setMemoValues(memoInit);
   };
 
+  // 管理者認証チェック
   useEffect(() => {
+    const checkAdmin = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('user_type')
+          .eq('id', session.user.id)
+          .single();
+        if (userData?.user_type === 'admin') {
+          setAdminSession(session);
+        } else {
+          await supabase.auth.signOut();
+        }
+      }
+      setAdminLoading(false);
+    };
+    checkAdmin();
+  }, []);
+
+  useEffect(() => {
+    if (!adminSession) return;
     fetchApplications();
     fetchCoaches();
-  }, []);
+  }, [adminSession]);
+
+  const handleAdminLogin = async (e) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+      if (error) throw error;
+      // user_type が admin か確認
+      const { data: userData } = await supabase
+        .from('users')
+        .select('user_type')
+        .eq('id', data.user.id)
+        .single();
+      if (userData?.user_type !== 'admin') {
+        await supabase.auth.signOut();
+        throw new Error('管理者権限がありません');
+      }
+      setAdminSession(data.session);
+    } catch (err) {
+      setLoginError(err.message || 'ログインに失敗しました');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    await supabase.auth.signOut();
+    setAdminSession(null);
+  };
 
   const handleSaveCoachMemo = async (coachId) => {
     const memo = memoValues[coachId] || '';
@@ -250,17 +313,91 @@ const AdminDashboard = () => {
   const approvedCount = applications.filter(a => a.status === 'approved').length;
   const rejectedCount = applications.filter(a => a.status === 'rejected').length;
 
+  // ローディング中
+  if (adminLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-500">読み込み中...</p>
+      </div>
+    );
+  }
+
+  // 未ログイン → ログイン画面
+  if (!adminSession) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-white flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-14 h-14 bg-pink-100 rounded-full flex items-center justify-center mb-3">
+              <Lock className="w-7 h-7 text-pink-500" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-800">管理画面ログイン</h1>
+            <p className="text-sm text-gray-500 mt-1">推しコーチング 運営専用</p>
+          </div>
+
+          <form onSubmit={handleAdminLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス</label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={e => setLoginEmail(e.target.value)}
+                placeholder="admin@example.com"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">パスワード</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+                <p className="text-sm text-red-600">{loginError}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              style={{ backgroundColor: loginLoading ? '#d1d5db' : '#ec4899', color: '#fff', width: '100%', padding: '12px', borderRadius: '8px', fontWeight: '600', fontSize: '15px' }}
+            >
+              {loginLoading ? 'ログイン中...' : 'ログイン'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* ヘッダー */}
       <header className="bg-white border-b border-pink-100 sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <Shield className="w-7 h-7 text-pink-500 shrink-0" />
-            <div>
-              <h1 className="text-lg font-bold text-gray-800">推しコーチング 管理画面</h1>
-              <p className="text-xs text-gray-500">コーチアカウント管理</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield className="w-7 h-7 text-pink-500 shrink-0" />
+              <div>
+                <h1 className="text-lg font-bold text-gray-800">推しコーチング 管理画面</h1>
+                <p className="text-xs text-gray-500">コーチアカウント管理</p>
+              </div>
             </div>
+            <button
+              onClick={handleAdminLogout}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-pink-600"
+            >
+              <LogOut className="w-4 h-4" />
+              ログアウト
+            </button>
           </div>
         </div>
       </header>
