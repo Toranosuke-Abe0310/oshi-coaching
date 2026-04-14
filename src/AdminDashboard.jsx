@@ -14,6 +14,10 @@ const AdminDashboard = () => {
   const [coaches, setCoaches] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // コーチメモ関連のstate
+  const [editingMemoId, setEditingMemoId] = useState(null); // 編集中のcoach.id
+  const [memoValues, setMemoValues] = useState({}); // { [coach.id]: memoText }
+
   // コーチ登録フォームのstate
   const [coachForm, setCoachForm] = useState({
     userId: '',
@@ -105,17 +109,37 @@ const AdminDashboard = () => {
       (usersData || []).forEach(u => { usersMap[u.id] = u; });
     }
 
-    setCoaches(coachData.map(c => ({
+    const mapped = coachData.map(c => ({
       ...c,
       userEmail: usersMap[c.user_id]?.email || '',
       userName: usersMap[c.user_id]?.name || ''
-    })));
+    }));
+    setCoaches(mapped);
+    // メモの初期値をセット
+    const memoInit = {};
+    mapped.forEach(c => { memoInit[c.id] = c.admin_memo || ''; });
+    setMemoValues(memoInit);
   };
 
   useEffect(() => {
     fetchApplications();
     fetchCoaches();
   }, []);
+
+  const handleSaveCoachMemo = async (coachId) => {
+    const memo = memoValues[coachId] || '';
+    const { error } = await supabase
+      .from('coaches')
+      .update({ admin_memo: memo })
+      .eq('id', coachId);
+    if (error) {
+      alert('保存に失敗しました: ' + error.message);
+      return;
+    }
+    setCoaches(prev => prev.map(c => c.id === coachId ? { ...c, admin_memo: memo } : c));
+    setEditingMemoId(null);
+    alert('メモを保存しました');
+  };
 
   const handleCreateCoach = async (e) => {
     e.preventDefault();
@@ -718,6 +742,56 @@ const AdminDashboard = () => {
                         <span className="font-bold">{coach.clients_count || 0}名</span>
                       </div>
                     </div>
+                  </div>
+
+                  {/* メモ欄 */}
+                  <div className="mt-4 border-t border-gray-100 pt-4">
+                    {editingMemoId === coach.id ? (
+                      <div>
+                        <textarea
+                          value={memoValues[coach.id] || ''}
+                          onChange={e => setMemoValues(prev => ({ ...prev, [coach.id]: e.target.value }))}
+                          placeholder="管理用メモを入力..."
+                          className="w-full px-3 py-2 border border-pink-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm resize-none h-20"
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => handleSaveCoachMemo(coach.id)}
+                            style={{ backgroundColor: '#ec4899', color: '#fff', padding: '6px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '600' }}
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={() => {
+                              setMemoValues(prev => ({ ...prev, [coach.id]: coach.admin_memo || '' }));
+                              setEditingMemoId(null);
+                            }}
+                            style={{ backgroundColor: '#f3f4f6', color: '#6b7280', padding: '6px 16px', borderRadius: '8px', fontSize: '13px' }}
+                          >
+                            キャンセル
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          {coach.admin_memo ? (
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{coach.admin_memo}</p>
+                          ) : (
+                            <p className="text-sm text-gray-400">メモなし</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setMemoValues(prev => ({ ...prev, [coach.id]: coach.admin_memo || '' }));
+                            setEditingMemoId(coach.id);
+                          }}
+                          style={{ color: '#ec4899', fontSize: '13px', whiteSpace: 'nowrap' }}
+                        >
+                          {coach.admin_memo ? '編集' : '＋メモ追加'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))

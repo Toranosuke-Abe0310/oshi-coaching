@@ -1498,7 +1498,7 @@ const OshiCoachingApp = () => {
                       {clientDetailView === 'sessions' && (
                         <div>
                           <h3 className="text-lg font-bold text-gray-800 mb-4">メッセージ</h3>
-                          <div className="flex flex-col-reverse gap-4 mb-4 max-h-96 overflow-y-auto">
+                          <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
                             {messages
                               .filter(m => {
                                 const myId = session?.user?.id;
@@ -1523,7 +1523,7 @@ const OshiCoachingApp = () => {
                             ))}
                           </div>
 
-                          <div className="flex gap-2">
+                          <div style={{ borderTop: '1px solid #f3f4f6', padding: '12px', display: 'flex', gap: '8px', backgroundColor: '#fff' }}>
                             <input
                               type="text"
                               placeholder="メッセージを入力..."
@@ -1532,7 +1532,7 @@ const OshiCoachingApp = () => {
                               onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendMessage(selectedClient.id); }}
                               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                             />
-                            <button onClick={() => sendMessage(selectedClient.id)} className="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
+                            <button onClick={() => sendMessage(selectedClient.id)} style={{ backgroundColor: '#ec4899', color: '#fff', padding: '8px 24px', borderRadius: '8px' }}>
                               送信
                             </button>
                           </div>
@@ -1932,47 +1932,37 @@ const OshiCoachingApp = () => {
 
           {/* メッセージエリア */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ display: clientMyCoachTab === 'files' ? 'none' : 'block' }}>
-            <div className="flex flex-col h-[60vh] min-h-[400px]">
-              {/* メッセージ一覧（最新が上） */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-3">
-                {messages
-                  .filter(m => {
-                    const myId = session?.user?.id;
-                    const partnerId = selectedCoach?.user_id;
-                    if (!partnerId) return false;
-                    return (m.sender_id === myId && m.receiver_id === partnerId) ||
-                           (m.sender_id === partnerId && m.receiver_id === myId);
-                  })
-                  .slice().reverse()
-                  .map(msg => (
-                    <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
-                        msg.sender === 'me'
-                          ? 'bg-pink-500 text-white rounded-br-sm'
-                          : 'bg-gray-100 text-gray-800 rounded-bl-sm'
-                      }`}>
-                        <p>{renderMessageText(msg.text, msg.sender === 'me')}</p>
-                        <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>
-                          {msg.time}
-                        </p>
-                      </div>
+            {/* メッセージ一覧（固定高さ・安定スクロール） */}
+            <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+              {(() => {
+                const myId = session?.user?.id;
+                const partnerId = selectedCoach?.user_id;
+                const filtered = messages.filter(m =>
+                  partnerId && ((m.sender_id === myId && m.receiver_id === partnerId) ||
+                  (m.sender_id === partnerId && m.receiver_id === myId))
+                );
+                if (filtered.length === 0) return (
+                  <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。最初のメッセージを送ってみましょう！</p>
+                );
+                return filtered.slice().reverse().map(msg => (
+                  <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
+                      msg.sender === 'me'
+                        ? 'bg-pink-500 text-white rounded-br-sm'
+                        : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                    }`}>
+                      <p>{renderMessageText(msg.text, msg.sender === 'me')}</p>
+                      <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>
+                        {msg.time}
+                      </p>
                     </div>
-                  ))}
-                {messages.filter(m => {
-                  const myId = session?.user?.id;
-                  const partnerId = selectedCoach?.user_id;
-                  if (!partnerId) return false;
-                  return (m.sender_id === myId && m.receiver_id === partnerId) ||
-                         (m.sender_id === partnerId && m.receiver_id === myId);
-                }).length === 0 && (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-gray-400 text-sm">まだメッセージがありません。最初のメッセージを送ってみましょう！</p>
                   </div>
-                )}
-              </div>
+                ));
+              })()}
+            </div>
 
-              {/* 入力欄 */}
-              <div className="border-t border-gray-100 p-3 flex gap-2">
+            {/* 入力欄（常に下に固定） */}
+            <div style={{ borderTop: '1px solid #f3f4f6', padding: '12px', display: 'flex', gap: '8px', backgroundColor: '#fff' }}>
                 {!selectedCoach?.user_id && (
                   <p className="text-sm text-red-500 w-full text-center">コーチ情報が正しく読み込まれていません</p>
                 )}
