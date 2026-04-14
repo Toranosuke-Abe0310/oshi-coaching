@@ -1987,7 +1987,6 @@ const OshiCoachingApp = () => {
               </div>
             </div>
           </div>
-        </div>
         <Footer />
       </div>
     );
