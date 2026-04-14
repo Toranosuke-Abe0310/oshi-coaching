@@ -117,10 +117,21 @@ const AdminDashboard = () => {
       (usersData || []).forEach(u => { usersMap[u.id] = u; });
     }
 
+    // 承認済みクライアント数をapplicationsテーブルから集計
+    const { data: approvedApps } = await supabase
+      .from('applications')
+      .select('coach_id')
+      .eq('status', 'approved');
+    const clientCountMap = {};
+    (approvedApps || []).forEach(a => {
+      clientCountMap[a.coach_id] = (clientCountMap[a.coach_id] || 0) + 1;
+    });
+
     const mapped = coachData.map(c => ({
       ...c,
       userEmail: usersMap[c.user_id]?.email || '',
-      userName: usersMap[c.user_id]?.name || ''
+      userName: usersMap[c.user_id]?.name || '',
+      approvedClientsCount: clientCountMap[c.user_id] || 0
     }));
     setCoaches(mapped);
     // メモの初期値をセット
@@ -876,7 +887,7 @@ const AdminDashboard = () => {
                     <div className="text-right">
                       <div className="flex items-center gap-1 text-pink-600">
                         <Users className="w-4 h-4" />
-                        <span className="font-bold">{coach.clients_count || 0}名</span>
+                        <span className="font-bold">{coach.approvedClientsCount}名</span>
                       </div>
                     </div>
                   </div>
