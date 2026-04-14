@@ -456,7 +456,7 @@ const OshiCoachingApp = () => {
         </header>
 
         {/* モバイル底部ナビゲーション */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-pink-100 z-20 flex">
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-20 flex" style={{ backgroundColor: '#fff', borderTop: '1px solid #fce7f3' }}>
           {[
             { view: 'dashboard', icon: <Users className="w-5 h-5" />, label: 'クライアント' },
             { view: 'calendar', icon: <Calendar className="w-5 h-5" />, label: 'スケジュール' },
@@ -465,9 +465,21 @@ const OshiCoachingApp = () => {
             <button
               key={item.view}
               onClick={() => setCurrentView(item.view)}
-              className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium transition-colors ${
-                currentView === item.view ? 'text-pink-600' : 'text-gray-400'
-              }`}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                padding: '10px 0',
+                gap: '4px',
+                fontSize: '11px',
+                fontWeight: 500,
+                background: 'none',
+                border: 'none',
+                borderTop: currentView === item.view ? '2px solid #ec4899' : '2px solid transparent',
+                color: currentView === item.view ? '#ec4899' : '#9ca3af',
+                cursor: 'pointer',
+              }}
             >
               {item.icon}
               {item.label}
@@ -522,45 +534,38 @@ const OshiCoachingApp = () => {
                   </div>
 
                   {/* タブナビゲーション */}
-                  <div className="bg-white rounded-xl shadow-sm mb-6">
-                    <div className="border-b border-gray-200">
-                      <div className="flex gap-4 px-6">
+                  <div className="bg-white rounded-xl shadow-sm mb-6 p-3">
+                    <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                      {[
+                        { key: 'account', label: 'アカウント' },
+                        { key: 'profile', label: 'プロフィール' },
+                        { key: 'notifications', label: '通知' },
+                      ].map(tab => (
                         <button
-                          onClick={() => setSettingsTab('account')}
-                          className={`py-4 px-2 border-b-2 font-medium ${
-                            settingsTab === 'account'
-                              ? 'border-pink-500 text-pink-600'
-                              : 'border-transparent text-gray-600 hover:text-pink-600'
-                          }`}
+                          key={tab.key}
+                          onClick={() => setSettingsTab(tab.key)}
+                          style={{
+                            flexShrink: 0,
+                            padding: '8px 18px',
+                            borderRadius: '999px',
+                            fontSize: '13px',
+                            fontWeight: 500,
+                            border: 'none',
+                            cursor: 'pointer',
+                            position: 'relative',
+                            backgroundColor: settingsTab === tab.key ? '#ec4899' : '#fdf2f8',
+                            color: settingsTab === tab.key ? '#fff' : '#9ca3af',
+                            transition: 'all 0.2s',
+                          }}
                         >
-                          アカウント
-                        </button>
-                        <button
-                          onClick={() => setSettingsTab('profile')}
-                          className={`py-4 px-2 border-b-2 font-medium ${
-                            settingsTab === 'profile'
-                              ? 'border-pink-500 text-pink-600'
-                              : 'border-transparent text-gray-600 hover:text-pink-600'
-                          }`}
-                        >
-                          コーチ一覧用プロフィール
-                        </button>
-                        <button
-                          onClick={() => setSettingsTab('notifications')}
-                          className={`py-4 px-2 border-b-2 font-medium relative ${
-                            settingsTab === 'notifications'
-                              ? 'border-pink-500 text-pink-600'
-                              : 'border-transparent text-gray-600 hover:text-pink-600'
-                          }`}
-                        >
-                          通知
-                          {notifications.filter(n => !n.read).length > 0 && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                          {tab.label}
+                          {tab.key === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
+                            <span style={{ position: 'absolute', top: '-4px', right: '-4px', width: '18px', height: '18px', backgroundColor: '#ef4444', color: '#fff', fontSize: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               {notifications.filter(n => !n.read).length}
                             </span>
                           )}
                         </button>
-                      </div>
+                      ))}
                     </div>
                   </div>
 
