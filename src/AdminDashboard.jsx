@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, Check, X, Search, Mail, Users, Calendar, UserPlus, LogOut, Lock } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Shield, Check, X, Search, Mail, Users, Calendar, UserPlus, LogOut, Lock, MessageCircle, Send, ArrowLeft } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const AdminDashboard = () => {
@@ -23,8 +23,14 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
 
   // コーチメモ関連のstate
-  const [editingMemoId, setEditingMemoId] = useState(null); // 編集中のcoach.id
-  const [memoValues, setMemoValues] = useState({}); // { [coach.id]: memoText }
+  const [editingMemoId, setEditingMemoId] = useState(null);
+  const [memoValues, setMemoValues] = useState({});
+
+  // コーチチャット関連のstate
+  const [chatCoach, setChatCoach] = useState(null); // チャット中のコーチ
+  const [adminChatMessages, setAdminChatMessages] = useState([]);
+  const [adminChatNewMessage, setAdminChatNewMessage] = useState('');
+  const adminSeenIds = useRef(new Set());
 
   // コーチ登録フォームのstate
   const [coachForm, setCoachForm] = useState({
@@ -199,6 +205,71 @@ const AdminDashboard = () => {
     await supabase.auth.signOut();
     setAdminSession(null);
   };
+
+  // コーチとのチャットを開く
+  const openCoachChat = async (coach) => {
+    setChatCoach(coach);
+    adminSeenIds.current = new Set();
+    const adminId = adminSession.user.id;
+    const coachId = coach.user_id;
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${adminId},receiver_id.eq.${coachId}),and(sender_id.eq.${coachId},receiver_id.eq.${adminId})`)
+      .order('created_at', { ascending: true });
+    if (data) {
+      data.forEach(m => adminSeenIds.current.add(m.id));
+      setAdminChatMessages(data.map(m => ({
+        id: m.id,
+        sender: m.sender_id === adminId ? 'me' : 'coach',
+        text: m.text,
+        time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        sender_id: m.sender_id,
+        receiver_id: m.receiver_id,
+      })));
+    }
+  };
+
+  // 管理者→コーチにメッセージ送信
+  const sendAdminMessage = async () => {
+    if (!adminChatNewMessage.trim() || !chatCoach) return;
+    const text = adminChatNewMessage.trim();
+    setAdminChatNewMessage('');
+    const { data: sent } = await supabase
+      .from('messages')
+      .insert({ sender_id: adminSession.user.id, receiver_id: chatCoach.user_id, text })
+      .select().single();
+    if (sent) {
+      adminSeenIds.current.add(sent.id);
+      setAdminChatMessages(prev => [...prev, {
+        id: sent.id, sender: 'me', text: sent.text,
+        time: new Date(sent.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        sender_id: sent.sender_id, receiver_id: sent.receiver_id,
+      }]);
+    }
+  };
+
+  // リアルタイム購読（チャット中のコーチが変わったら再購読）
+  useEffect(() => {
+    if (!chatCoach || !adminSession) return;
+    const adminId = adminSession.user.id;
+    const coachId = chatCoach.user_id;
+    const channel = supabase.channel(`admin-coach-chat-${coachId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const m = payload.new;
+        if (adminSeenIds.current.has(m.id)) return;
+        const isRelevant = (m.sender_id === adminId && m.receiver_id === coachId) ||
+                           (m.sender_id === coachId && m.receiver_id === adminId);
+        if (!isRelevant) return;
+        adminSeenIds.current.add(m.id);
+        setAdminChatMessages(prev => [...prev, {
+          id: m.id, sender: m.sender_id === adminId ? 'me' : 'coach', text: m.text,
+          time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          sender_id: m.sender_id, receiver_id: m.receiver_id,
+        }]);
+      }).subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [chatCoach, adminSession]);
 
   const handleSaveCoachMemo = async (coachId) => {
     const memo = memoValues[coachId] || '';
@@ -845,6 +916,52 @@ const AdminDashboard = () => {
         {/* コーチアカウント管理 */}
         {viewType === 'coaches' && (
           <div className="space-y-4">
+            {/* チャット画面 */}
+            {chatCoach && (
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-4">
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-pink-50">
+                  <button onClick={() => setChatCoach(null)} style={{ color: '#ec4899' }}>
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                  <div className="w-9 h-9 bg-pink-200 rounded-full flex items-center justify-center text-xl">
+                    {chatCoach.image || '🌸'}
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-800 text-sm">{chatCoach.display_name}</p>
+                    <p className="text-xs text-gray-500">運営とのチャット</p>
+                  </div>
+                </div>
+                <div style={{ overflowY: 'auto', maxHeight: '360px', minHeight: '160px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', overscrollBehavior: 'contain' }}>
+                  {adminChatMessages.length === 0 && (
+                    <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません</p>
+                  )}
+                  {adminChatMessages.map(msg => (
+                    <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-xs px-3 py-2 rounded-2xl text-sm ${
+                        msg.sender === 'me' ? 'bg-pink-500 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                      }`}>
+                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                        <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>{msg.time}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ borderTop: '1px solid #f3f4f6', padding: '10px 12px', display: 'flex', gap: '8px', backgroundColor: '#fff' }}>
+                  <input
+                    type="text"
+                    placeholder="メッセージを入力..."
+                    value={adminChatNewMessage}
+                    onChange={e => setAdminChatNewMessage(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendAdminMessage(); }}
+                    className="flex-1 px-3 py-2 bg-gray-100 rounded-full focus:outline-none focus:bg-white focus:ring-2 focus:ring-pink-300 text-sm"
+                  />
+                  <button onClick={sendAdminMessage} style={{ backgroundColor: '#ec4899', color: '#fff', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-gray-500">登録済みコーチ: {coaches.length}名</p>
               <button
@@ -884,11 +1001,18 @@ const AdminDashboard = () => {
                         </div>
                       )}
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex flex-col items-end gap-2">
                       <div className="flex items-center gap-1 text-pink-600">
                         <Users className="w-4 h-4" />
                         <span className="font-bold">{coach.approvedClientsCount}名</span>
                       </div>
+                      <button
+                        onClick={() => openCoachChat(coach)}
+                        style={{ backgroundColor: '#fdf2f8', color: '#ec4899', border: '1px solid #fbcfe8', padding: '4px 12px', borderRadius: '999px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <MessageCircle className="w-3 h-3" />
+                        チャット
+                      </button>
                     </div>
                   </div>
 

@@ -219,6 +219,55 @@ const OshiCoachingApp = () => {
 
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedClient, setSelectedClient] = useState(null);
+
+  // 運営チャット用のstate（コーチ側）
+  const [adminUserId, setAdminUserId] = useState(null);
+  const [adminChatMessages, setAdminChatMessages] = useState([]);
+  const [adminChatNewMessage, setAdminChatNewMessage] = useState('');
+  const adminSeenIds = useRef(new Set());
+
+  // 運営ユーザーIDを取得 & メッセージ購読
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user) return;
+    const setup = async () => {
+      // adminユーザーを取得
+      const { data: adminUser } = await supabase
+        .from('users').select('id').eq('user_type', 'admin').single();
+      if (!adminUser) return;
+      setAdminUserId(adminUser.id);
+      const coachId = session.user.id;
+      // メッセージ取得
+      const { data: msgs } = await supabase
+        .from('messages').select('*')
+        .or(`and(sender_id.eq.${coachId},receiver_id.eq.${adminUser.id}),and(sender_id.eq.${adminUser.id},receiver_id.eq.${coachId})`)
+        .order('created_at', { ascending: true });
+      if (msgs) {
+        msgs.forEach(m => adminSeenIds.current.add(m.id));
+        setAdminChatMessages(msgs.map(m => ({
+          id: m.id, sender: m.sender_id === coachId ? 'me' : 'admin',
+          text: m.text,
+          time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        })));
+      }
+      // リアルタイム購読
+      const channel = supabase.channel(`coach-admin-chat-${coachId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          const m = payload.new;
+          if (adminSeenIds.current.has(m.id)) return;
+          const relevant = (m.sender_id === coachId && m.receiver_id === adminUser.id) ||
+                           (m.sender_id === adminUser.id && m.receiver_id === coachId);
+          if (!relevant) return;
+          adminSeenIds.current.add(m.id);
+          setAdminChatMessages(prev => [...prev, {
+            id: m.id, sender: m.sender_id === coachId ? 'me' : 'admin',
+            text: m.text,
+            time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        }).subscribe();
+      return () => supabase.removeChannel(channel);
+    };
+    setup();
+  }, [userType, session]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoText, setMemoText] = useState('');
@@ -414,6 +463,24 @@ const OshiCoachingApp = () => {
     }
   };
 
+  // 運営へのメッセージ送信（コーチ側）
+  const sendAdminMessage = async () => {
+    if (!adminChatNewMessage.trim() || !adminUserId || !session?.user) return;
+    const text = adminChatNewMessage.trim();
+    setAdminChatNewMessage('');
+    const { data: sent } = await supabase
+      .from('messages')
+      .insert({ sender_id: session.user.id, receiver_id: adminUserId, text })
+      .select().single();
+    if (sent) {
+      adminSeenIds.current.add(sent.id);
+      setAdminChatMessages(prev => [...prev, {
+        id: sent.id, sender: 'me', text: sent.text,
+        time: new Date(sent.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      }]);
+    }
+  };
+
   // ローディング中
   if (loading) {
     return (
@@ -460,6 +527,7 @@ const OshiCoachingApp = () => {
           {[
             { view: 'dashboard', icon: <Users className="w-5 h-5" />, label: 'クライアント' },
             { view: 'calendar', icon: <Calendar className="w-5 h-5" />, label: 'スケジュール' },
+            { view: 'admin_chat', icon: <MessageCircle className="w-5 h-5" />, label: '運営' },
             { view: 'settings', icon: <Settings className="w-5 h-5" />, label: '設定' },
           ].map(item => (
             <button
@@ -512,6 +580,15 @@ const OshiCoachingApp = () => {
                     <span>スケジュール</span>
                   </button>
                   <button
+                    onClick={() => setCurrentView('admin_chat')}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                      currentView === 'admin_chat' ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                    <span>運営とチャット</span>
+                  </button>
+                  <button
                     onClick={() => setCurrentView('settings')}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                       currentView === 'settings' ? 'bg-pink-50 text-pink-600' : 'text-gray-700 hover:bg-gray-50'
@@ -526,6 +603,57 @@ const OshiCoachingApp = () => {
 
             {/* メインコンテンツ */}
             <div className="lg:col-span-3">
+
+              {/* 運営とチャット */}
+              {currentView === 'admin_chat' && (
+                <div>
+                  <div className="mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-1">運営とチャット</h2>
+                    <p className="text-gray-500 text-sm">推しコーチング運営事務局とのやり取り</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-pink-50">
+                      <div className="w-9 h-9 bg-pink-200 rounded-full flex items-center justify-center text-lg">🛡️</div>
+                      <div>
+                        <p className="font-bold text-gray-800 text-sm">推しコーチング運営</p>
+                        <p className="text-xs text-gray-500">運営事務局</p>
+                      </div>
+                    </div>
+                    <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+                      {adminChatMessages.length === 0 && (
+                        <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。運営へのご連絡はこちらからどうぞ！</p>
+                      )}
+                      {adminChatMessages.map(msg => (
+                        <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
+                            msg.sender === 'me' ? 'bg-pink-500 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                          }`}>
+                            <p className="whitespace-pre-wrap">{msg.text}</p>
+                            <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-pink-100' : 'text-gray-400'}`}>{msg.time}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ borderTop: '1px solid #f3f4f6', padding: '12px', display: 'flex', gap: '8px', backgroundColor: '#fff' }}>
+                      <input
+                        type="text"
+                        placeholder="運営へのメッセージを入力..."
+                        value={adminChatNewMessage}
+                        onChange={e => setAdminChatNewMessage(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendAdminMessage(); }}
+                        className="flex-1 px-4 py-2 bg-gray-100 rounded-full focus:outline-none focus:bg-white focus:ring-2 focus:ring-pink-300 text-sm"
+                      />
+                      <button
+                        onClick={sendAdminMessage}
+                        style={{ backgroundColor: '#ec4899', color: '#fff', padding: '8px 20px', borderRadius: '999px', fontSize: '14px', fontWeight: '600' }}
+                      >
+                        送信
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {currentView === 'settings' && (
                 <div>
                   <div className="mb-6">
