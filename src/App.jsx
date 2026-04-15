@@ -928,8 +928,7 @@ const OshiCoachingApp = () => {
 
                         <button
                           onClick={async () => {
-                            const { error } = await supabase.from('coaches').upsert({
-                              user_id: session.user.id,
+                            const { error } = await supabase.from('coaches').update({
                               display_name: coachProfile.displayName,
                               former_group: coachProfile.formerGroup,
                               specialty: coachProfile.specialty,
@@ -938,7 +937,7 @@ const OshiCoachingApp = () => {
                               available_days: coachProfile.availableDays,
                               image: coachProfile.image,
                               max_clients: coachProfile.maxClients ? parseInt(coachProfile.maxClients) : null,
-                            }, { onConflict: 'user_id' });
+                            }).eq('user_id', session.user.id);
                             if (error) { alert('保存に失敗しました: ' + error.message); return; }
                             alert('プロフィールを保存しました');
                           }}
