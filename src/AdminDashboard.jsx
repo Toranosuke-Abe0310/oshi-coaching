@@ -271,6 +271,18 @@ const AdminDashboard = () => {
     return () => supabase.removeChannel(channel);
   }, [chatCoach, adminSession]);
 
+  // 最大クライアント数を保存
+  const handleSaveMaxClients = async (coachId, value) => {
+    const maxClients = value === '' ? null : parseInt(value);
+    const { error } = await supabase
+      .from('coaches')
+      .update({ max_clients: maxClients })
+      .eq('id', coachId);
+    if (error) { alert('保存に失敗しました: ' + error.message); return; }
+    setCoaches(prev => prev.map(c => c.id === coachId ? { ...c, max_clients: maxClients } : c));
+    alert('上限人数を保存しました');
+  };
+
   const handleSaveCoachMemo = async (coachId) => {
     const memo = memoValues[coachId] || '';
     const { error } = await supabase
@@ -1013,6 +1025,30 @@ const AdminDashboard = () => {
                         <MessageCircle className="w-3 h-3" />
                         チャット
                       </button>
+                    </div>
+                  </div>
+
+                  {/* 上限人数・残り枠 */}
+                  <div className="mt-4 border-t border-gray-100 pt-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-sm font-medium text-gray-700">🎫 上限人数:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        defaultValue={coach.max_clients || ''}
+                        placeholder="無制限"
+                        onBlur={e => handleSaveMaxClients(coach.id, e.target.value)}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-pink-500"
+                      />
+                      {coach.max_clients != null && (
+                        <span className={`text-sm font-bold ${
+                          coach.max_clients - coach.approvedClientsCount <= 0 ? 'text-red-500' :
+                          coach.max_clients - coach.approvedClientsCount <= 3 ? 'text-orange-500' : 'text-green-600'
+                        }`}>
+                          残り{Math.max(0, coach.max_clients - coach.approvedClientsCount)}名
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400">（入力後フォーカスを外すと保存）</span>
                     </div>
                   </div>
 

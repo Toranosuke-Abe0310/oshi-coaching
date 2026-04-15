@@ -61,6 +61,19 @@ const OshiCoachingApp = () => {
         .select('*')
         .order('created_at', { ascending: true });
       if (data) {
+        // コーチごとの有効申し込み数を取得（pending + approved）
+        const coachIds = data.map(c => c.user_id).filter(Boolean);
+        let appCountMap = {};
+        if (coachIds.length > 0) {
+          const { data: apps } = await supabase
+            .from('applications')
+            .select('coach_id')
+            .in('coach_id', coachIds)
+            .in('status', ['pending', 'approved']);
+          (apps || []).forEach(a => {
+            appCountMap[a.coach_id] = (appCountMap[a.coach_id] || 0) + 1;
+          });
+        }
         setCoaches(data.map(c => ({
           id: c.id,
           user_id: c.user_id,
@@ -71,7 +84,9 @@ const OshiCoachingApp = () => {
           clients: c.clients_count || 0,
           introduction: c.introduction || '',
           sessionPrice: c.session_price || '',
-          availableDays: c.available_days || []
+          availableDays: c.available_days || [],
+          maxClients: c.max_clients || null,
+          currentApplications: appCountMap[c.user_id] || 0,
         })));
       }
       setCoachesLoading(false);
@@ -210,7 +225,8 @@ const OshiCoachingApp = () => {
           introduction: data.introduction || '',
           sessionPrice: data.session_price || '',
           availableDays: data.available_days || [],
-          image: data.image || '🌸'
+          image: data.image || '🌸',
+          maxClients: data.max_clients != null ? String(data.max_clients) : ''
         });
       }
     };
@@ -299,7 +315,8 @@ const OshiCoachingApp = () => {
     introduction: 'アイドル時代の経験を活かし、夢に向かって頑張るあなたをサポートします。一緒に目標達成を目指しましょう!',
     sessionPrice: '10,000円/60分',
     availableDays: ['月', '水', '金'],
-    image: '🌸'
+    image: '🌸',
+    maxClients: ''
   });
   const [notifications, setNotifications] = useState([
     // コーチへの通知は管理画面で承認後に届く
@@ -309,6 +326,21 @@ const OshiCoachingApp = () => {
   const [clientViewType, setClientViewType] = useState(null); // 'search' or 'mycoach'
   const [currentCoachIndex, setCurrentCoachIndex] = useState(0);
   const [applicationMessage, setApplicationMessage] = useState('');
+  const [appliedCoachIds, setAppliedCoachIds] = useState(new Set()); // 申し込み済みコーチID
+
+  // ログイン済みクライアントが申し込み済みのコーチIDを取得
+  useEffect(() => {
+    if (!session?.user) return;
+    const fetchMyApplications = async () => {
+      const { data } = await supabase
+        .from('applications')
+        .select('coach_id')
+        .eq('client_id', session.user.id)
+        .in('status', ['pending', 'approved']);
+      if (data) setAppliedCoachIds(new Set(data.map(a => a.coach_id)));
+    };
+    fetchMyApplications();
+  }, [session]);
   const [clientMyCoachTab, setClientMyCoachTab] = useState('messages'); // 'messages', 'schedule', 'files'
   const [clientFiles, setClientFiles] = useState([]);
 
@@ -826,6 +858,21 @@ const OshiCoachingApp = () => {
 
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                              最大クライアント数 <span className="text-gray-400 font-normal">（空欄=無制限）</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={coachProfile.maxClients}
+                              onChange={(e) => setCoachProfile({...coachProfile, maxClients: e.target.value})}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                              placeholder="例: 10"
+                            />
+                            <p className="text-sm text-gray-500 mt-1">申し込み可能な最大人数を設定します</p>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
                               対応可能曜日
                             </label>
                             <div className="flex gap-2 flex-wrap">
@@ -880,7 +927,21 @@ const OshiCoachingApp = () => {
                         </div>
 
                         <button
-                          onClick={() => alert('プロフィールを保存しました')}
+                          onClick={async () => {
+                            const { error } = await supabase.from('coaches').upsert({
+                              user_id: session.user.id,
+                              display_name: coachProfile.displayName,
+                              former_group: coachProfile.formerGroup,
+                              specialty: coachProfile.specialty,
+                              introduction: coachProfile.introduction,
+                              session_price: coachProfile.sessionPrice,
+                              available_days: coachProfile.availableDays,
+                              image: coachProfile.image,
+                              max_clients: coachProfile.maxClients ? parseInt(coachProfile.maxClients) : null,
+                            }, { onConflict: 'user_id' });
+                            if (error) { alert('保存に失敗しました: ' + error.message); return; }
+                            alert('プロフィールを保存しました');
+                          }}
                           className="w-full mt-6 px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors font-medium"
                         >
                           保存する
@@ -1811,54 +1872,69 @@ const OshiCoachingApp = () => {
                     <span className="font-medium">👥 サポート実績:</span>
                     <span>{currentCoach.clients}名</span>
                   </div>
+                  {currentCoach.maxClients != null && (
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-700">🎫 残り枠:</span>
+                      {(() => {
+                        const remaining = currentCoach.maxClients - currentCoach.currentApplications;
+                        if (remaining <= 0) return <span className="text-red-500 font-bold">満員</span>;
+                        return <span className={`font-bold ${remaining <= 3 ? 'text-orange-500' : 'text-green-600'}`}>残り{remaining}名</span>;
+                      })()}
+                      <span className="text-gray-400 text-sm">/ {currentCoach.maxClients}名</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 申し込みフォーム */}
                 <div className="border-t border-gray-200 pt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    申し込みメッセージ
-                  </label>
-                  <textarea
-                    value={applicationMessage}
-                    onChange={(e) => setApplicationMessage(e.target.value)}
-                    placeholder="コーチへのメッセージを入力してください（希望日時や相談内容など）"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 h-32 mb-4"
-                  />
-                  <button
-                    onClick={async () => {
-                      if (!applicationMessage.trim()) {
-                        alert('メッセージを入力してください');
-                        return;
-                      }
-                      if (!currentCoach?.user_id) {
-                        alert('コーチ情報が取得できませんでした');
-                        return;
-                      }
-                      const { error } = await supabase.from('applications').insert({
-                        client_id: session.user.id,
-                        coach_id: currentCoach.user_id,
-                        message: applicationMessage,
-                        status: 'pending'
-                      });
-                      if (error) {
-                        alert('送信に失敗しました: ' + error.message);
-                        return;
-                      }
-                      alert(`${currentCoach.name}さんへの申し込みを送信しました！\n\n運営による承認後、コーチに通知されます。\n承認までしばらくお待ちください。`);
-                      setApplicationMessage('');
-
-                      // 次のコーチへ
-                      if (currentCoachIndex < coaches.length - 1) {
-                        setCurrentCoachIndex(currentCoachIndex + 1);
-                      } else {
-                        setCurrentCoachIndex(0);
-                      }
-                    }}
-                    className="w-full bg-pink-500 text-white py-4 rounded-xl hover:bg-pink-600 transition-colors font-bold text-lg flex items-center justify-center gap-2"
-                  >
-                    <Heart className="w-6 h-6" />
-                    申し込む
-                  </button>
+                  {appliedCoachIds.has(currentCoach.user_id) ? (
+                    <div className="bg-green-50 border border-green-200 rounded-xl py-4 px-4 text-center">
+                      <p className="text-green-700 font-medium">✅ 申し込み済みです</p>
+                      <p className="text-green-600 text-sm mt-1">運営の承認をお待ちください</p>
+                    </div>
+                  ) : currentCoach.maxClients != null && currentCoach.currentApplications >= currentCoach.maxClients ? (
+                    <div className="bg-red-50 border border-red-200 rounded-xl py-4 px-4 text-center">
+                      <p className="text-red-600 font-medium">🈵 現在満員です</p>
+                      <p className="text-red-500 text-sm mt-1">空き枠が出るまでお待ちください</p>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        申し込みメッセージ
+                      </label>
+                      <textarea
+                        value={applicationMessage}
+                        onChange={(e) => setApplicationMessage(e.target.value)}
+                        placeholder="コーチへのメッセージを入力してください（希望日時や相談内容など）"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 h-32 mb-4"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!applicationMessage.trim()) { alert('メッセージを入力してください'); return; }
+                          if (!currentCoach?.user_id) { alert('コーチ情報が取得できませんでした'); return; }
+                          const { error } = await supabase.from('applications').insert({
+                            client_id: session.user.id,
+                            coach_id: currentCoach.user_id,
+                            message: applicationMessage,
+                            status: 'pending'
+                          });
+                          if (error) { alert('送信に失敗しました: ' + error.message); return; }
+                          setAppliedCoachIds(prev => new Set([...prev, currentCoach.user_id]));
+                          alert(`${currentCoach.name}さんへの申し込みを送信しました！\n\n運営による承認後、コーチに通知されます。\n承認までしばらくお待ちください。`);
+                          setApplicationMessage('');
+                          if (currentCoachIndex < coaches.length - 1) {
+                            setCurrentCoachIndex(currentCoachIndex + 1);
+                          } else {
+                            setCurrentCoachIndex(0);
+                          }
+                        }}
+                        className="w-full bg-pink-500 text-white py-4 rounded-xl hover:bg-pink-600 transition-colors font-bold text-lg flex items-center justify-center gap-2"
+                      >
+                        <Heart className="w-6 h-6" />
+                        申し込む
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
