@@ -17,8 +17,14 @@ const OshiCoachingApp = () => {
       .eq('id', userId)
       .single();
     if (data) {
-      setUserType(data.user_type);
+      // user_typeがNULLのケースもあるので、その場合も状態を確定させる
+      setUserType(data.user_type || 'unknown');
       setUserData(data);
+    } else {
+      // usersテーブルに行が無い場合、userTypeをnullのままにすると
+      // ローディング表示が永久に続くので状態を確定させる
+      setUserType('unknown');
+      setUserData(null);
     }
   };
 
@@ -85,7 +91,7 @@ const OshiCoachingApp = () => {
           introduction: c.introduction || '',
           sessionPrice: c.session_price || '',
           availableDays: c.available_days || [],
-          maxClients: c.max_clients || null,
+          maxClients: c.max_clients ?? null,
           currentApplications: appCountMap[c.user_id] || 0,
         })));
       }
@@ -447,6 +453,19 @@ const OshiCoachingApp = () => {
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id]);
 
+  // メッセージ一覧のスクロールコンテナ用ref
+  // ファン側・コーチ側・「運営とチャット」の3箇所で使うが、同時にマウントされるのは
+  // 常に1つなのでrefは1つで足りる
+  const messagesScrollRef = useRef(null);
+
+  // メッセージは古い→新しい（最新が下）の順で描画するため、
+  // 表示切り替え時・メッセージ追加時に最下部へ自動スクロールする
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, adminChatMessages, selectedClient, selectedCoach, clientDetailView, clientMyCoachTab]);
+
   // メッセージ内のURLをリンクに変換して表示
   const renderMessageText = (text, isMine) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -528,6 +547,65 @@ const OshiCoachingApp = () => {
   // ログインしていない場合
   if (!session) {
     return <Login />
+  }
+
+  // usersテーブルからuser_typeを取得中（確定するまでの一瞬の白画面を防ぐ）
+  if (userType === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <Heart className="w-16 h-16 text-pink-400 mx-auto mb-4 animate-pulse" />
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 運営(admin)アカウントでログインしている場合
+  if (userType === 'admin') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full mb-4">
+                <Heart className="w-8 h-8 text-white" fill="white" />
+              </div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
+              <p className="text-gray-600">運営アカウントでログイン中です</p>
+            </div>
+
+            <div className="mb-6 p-3 rounded-lg text-sm bg-pink-50 text-pink-600 border border-pink-200 text-center">
+              こちらはファン・コーチ向けの画面です。<br />
+              運営の操作は管理画面から行ってください。
+            </div>
+
+            <a
+              href="/admin"
+              className="block w-full py-3 rounded-lg font-medium text-white text-center transition-all bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl"
+            >
+              管理画面へ
+            </a>
+
+            <div className="mt-6 text-center">
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut()
+                  window.location.reload()
+                }}
+                className="text-pink-600 hover:text-pink-700 text-sm font-medium"
+              >
+                ログアウト
+              </button>
+            </div>
+          </div>
+
+          <p className="text-center text-sm text-gray-500 mt-6">
+            © 2026 推しコーチング運営事務局
+          </p>
+        </div>
+      </div>
+    )
   }
 
   // コーチ側のダッシュボード
@@ -651,7 +729,7 @@ const OshiCoachingApp = () => {
                         <p className="text-xs text-gray-500">運営事務局</p>
                       </div>
                     </div>
-                    <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+                    <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
                       {adminChatMessages.length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。運営へのご連絡はこちらからどうぞ！</p>
                       )}
@@ -1686,7 +1764,7 @@ const OshiCoachingApp = () => {
                       {clientDetailView === 'sessions' && (
                         <div>
                           <h3 className="text-lg font-bold text-gray-800 mb-4">メッセージ</h3>
-                          <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+                          <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
                             {messages
                               .filter(m => {
                                 const myId = session?.user?.id;
@@ -1694,7 +1772,6 @@ const OshiCoachingApp = () => {
                                 return (m.sender_id === myId && m.receiver_id === partnerId) ||
                                        (m.sender_id === partnerId && m.receiver_id === myId);
                               })
-                              .slice().reverse()
                               .map(msg => (
                               <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs px-4 py-2 rounded-lg ${
@@ -2136,7 +2213,7 @@ const OshiCoachingApp = () => {
           {/* メッセージエリア */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ display: clientMyCoachTab === 'files' ? 'none' : 'block' }}>
             {/* メッセージ一覧（固定高さ・安定スクロール） */}
-            <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+            <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
               {(() => {
                 const myId = session?.user?.id;
                 const partnerId = selectedCoach?.user_id;
@@ -2147,7 +2224,7 @@ const OshiCoachingApp = () => {
                 if (filtered.length === 0) return (
                   <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。最初のメッセージを送ってみましょう！</p>
                 );
-                return filtered.slice().reverse().map(msg => (
+                return filtered.map(msg => (
                   <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
                       msg.sender === 'me'
@@ -2194,6 +2271,52 @@ const OshiCoachingApp = () => {
       </div>
     );
   }
+
+  // どの分岐にも当てはまらない場合のフォールバック
+  // （undefinedを返して画面が真っ白になる経路をなくすのが目的）
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full mb-4">
+              <Heart className="w-8 h-8 text-white" fill="white" />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
+            <p className="text-gray-600">アカウント情報を読み込めませんでした</p>
+          </div>
+
+          <div className="mb-6 p-3 rounded-lg text-sm bg-red-50 text-red-600 border border-red-200 text-center">
+            お手数ですが、再読み込みをお試しください。<br />
+            解決しない場合は運営までお問い合わせください。
+          </div>
+
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full py-3 rounded-lg font-medium text-white transition-all bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl"
+          >
+            再読み込み
+          </button>
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut()
+                window.location.reload()
+              }}
+              className="text-pink-600 hover:text-pink-700 text-sm font-medium"
+            >
+              ログアウト
+            </button>
+          </div>
+        </div>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          © 2026 推しコーチング運営事務局
+        </p>
+      </div>
+    </div>
+  );
 };
 
 export default OshiCoachingApp;
