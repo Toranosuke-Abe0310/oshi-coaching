@@ -235,6 +235,8 @@ const OshiCoachingApp = () => {
           maxClients: data.max_clients != null ? String(data.max_clients) : ''
         });
       }
+      // 行が無かった場合も含めて、取得を試み終えたら保存を解禁する
+      setCoachProfileLoaded(true);
     };
     fetchCoachProfile();
   }, [userType, session]);
@@ -249,13 +251,17 @@ const OshiCoachingApp = () => {
   const adminSeenIds = useRef(new Set());
 
   // 運営ユーザーIDを取得 & メッセージ購読
+  // 購読解除は必ずuseEffectのcleanupで行う。setup内でcleanupをreturnしても
+  // その戻り値は捨てられるため、チャンネルが解除されず溜まり続けてしまう
   useEffect(() => {
-    if (userType !== 'coach' || !session?.user) return;
+    if (userType !== 'coach' || !session?.user?.id) return;
+    let channel = null;
+    let cancelled = false;
     const setup = async () => {
       // adminユーザーを取得
       const { data: adminUser } = await supabase
         .from('users').select('id').eq('user_type', 'admin').single();
-      if (!adminUser) return;
+      if (!adminUser || cancelled) return;
       setAdminUserId(adminUser.id);
       const coachId = session.user.id;
       // メッセージ取得
@@ -263,6 +269,7 @@ const OshiCoachingApp = () => {
         .from('messages').select('*')
         .or(`and(sender_id.eq.${coachId},receiver_id.eq.${adminUser.id}),and(sender_id.eq.${adminUser.id},receiver_id.eq.${coachId})`)
         .order('created_at', { ascending: true });
+      if (cancelled) return;
       if (msgs) {
         msgs.forEach(m => adminSeenIds.current.add(m.id));
         setAdminChatMessages(msgs.map(m => ({
@@ -272,7 +279,7 @@ const OshiCoachingApp = () => {
         })));
       }
       // リアルタイム購読
-      const channel = supabase.channel(`coach-admin-chat-${coachId}`)
+      channel = supabase.channel(`coach-admin-chat-${coachId}-${Date.now()}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
           const m = payload.new;
           if (adminSeenIds.current.has(m.id)) return;
@@ -286,10 +293,16 @@ const OshiCoachingApp = () => {
             time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
           }]);
         }).subscribe();
-      return () => supabase.removeChannel(channel);
+      // 購読完了前にアンマウント/再実行された場合はここで後始末
+      if (cancelled) { supabase.removeChannel(channel); channel = null; }
     };
     setup();
-  }, [userType, session]);
+    return () => {
+      cancelled = true;
+      if (channel) { supabase.removeChannel(channel); channel = null; }
+    };
+    // sessionオブジェクトはトークン更新のたびに別物になるため、user.idで比較する
+  }, [userType, session?.user?.id]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoText, setMemoText] = useState('');
@@ -314,16 +327,20 @@ const OshiCoachingApp = () => {
   
   // 設定画面用のstate
   const [settingsTab, setSettingsTab] = useState('account'); // 'account', 'profile', 'notifications'
+  // 初期値は空。ダミーの実名を入れておくと、DBからの読み込みが終わる前に
+  // 「保存する」を押されたときに他人の名前で自分のプロフィールを上書きしてしまう
   const [coachProfile, setCoachProfile] = useState({
-    displayName: '桜井 美咲',
-    formerGroup: 'StarLight',
-    specialty: 'キャリア相談',
-    introduction: 'アイドル時代の経験を活かし、夢に向かって頑張るあなたをサポートします。一緒に目標達成を目指しましょう!',
-    sessionPrice: '10,000円/60分',
-    availableDays: ['月', '水', '金'],
+    displayName: '',
+    formerGroup: '',
+    specialty: '',
+    introduction: '',
+    sessionPrice: '',
+    availableDays: [],
     image: '🌸',
     maxClients: ''
   });
+  // 読み込みが終わるまで保存させないためのフラグ
+  const [coachProfileLoaded, setCoachProfileLoaded] = useState(false);
   const [notifications, setNotifications] = useState([
     // コーチへの通知は管理画面で承認後に届く
   ]);
@@ -1005,7 +1022,9 @@ const OshiCoachingApp = () => {
                         </div>
 
                         <button
+                          disabled={!coachProfileLoaded}
                           onClick={async () => {
+                            if (!coachProfileLoaded) return;
                             const { error } = await supabase.from('coaches').update({
                               display_name: coachProfile.displayName,
                               former_group: coachProfile.formerGroup,
@@ -1019,9 +1038,13 @@ const OshiCoachingApp = () => {
                             if (error) { alert('保存に失敗しました: ' + error.message); return; }
                             alert('プロフィールを保存しました');
                           }}
-                          className="w-full mt-6 px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors font-medium"
+                          className={`w-full mt-6 px-6 py-3 text-white rounded-lg transition-colors font-medium ${
+                            coachProfileLoaded
+                              ? 'bg-pink-500 hover:bg-pink-600'
+                              : 'bg-gray-400 cursor-not-allowed'
+                          }`}
                         >
-                          保存する
+                          {coachProfileLoaded ? '保存する' : '読み込み中...'}
                         </button>
                       </div>
                     </div>
@@ -1992,6 +2015,26 @@ const OshiCoachingApp = () => {
                         onClick={async () => {
                           if (!applicationMessage.trim()) { alert('メッセージを入力してください'); return; }
                           if (!currentCoach?.user_id) { alert('コーチ情報が取得できませんでした'); return; }
+                          // 画面を開いてから他の人が申し込んで満員になっている可能性があるため、
+                          // 送信直前に最新の申し込み数を取り直して上限を再チェックする
+                          const { data: latestCoach } = await supabase
+                            .from('coaches').select('max_clients')
+                            .eq('user_id', currentCoach.user_id).single();
+                          const limit = latestCoach?.max_clients ?? null;
+                          if (limit != null) {
+                            const { count } = await supabase
+                              .from('applications')
+                              .select('id', { count: 'exact', head: true })
+                              .eq('coach_id', currentCoach.user_id)
+                              .in('status', ['pending', 'approved']);
+                            if ((count ?? 0) >= limit) {
+                              alert('申し訳ありません。このコーチは満員になりました。');
+                              setCoaches(prev => prev.map(c => c.user_id === currentCoach.user_id
+                                ? { ...c, maxClients: limit, currentApplications: count ?? 0 }
+                                : c));
+                              return;
+                            }
+                          }
                           const { error } = await supabase.from('applications').insert({
                             client_id: session.user.id,
                             coach_id: currentCoach.user_id,
