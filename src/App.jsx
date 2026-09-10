@@ -1487,7 +1487,11 @@ const OshiCoachingApp = () => {
                 </div>
               )}
 
-              {selectedClient && (
+              {/* クライアント詳細はクライアント一覧タブ専用。
+                  currentViewで絞らないと、詳細を開いたまま他のタブに切り替えたときに
+                  そのタブの内容と詳細が同時に表示され、メッセージ一覧のスクロール
+                  コンテナも2つ同時にマウントされてしまう */}
+              {currentView === 'dashboard' && selectedClient && (
                 <div>
                   <button
                     onClick={() => {
