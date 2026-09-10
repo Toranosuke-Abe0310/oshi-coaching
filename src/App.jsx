@@ -58,6 +58,7 @@ const OshiCoachingApp = () => {
   const [coaches, setCoaches] = useState([]);
   const [coachesLoading, setCoachesLoading] = useState(true);
   const [realClients, setRealClients] = useState([]); // Supabaseから取得した実際のクライアント
+  const [approvedApps, setApprovedApps] = useState([]); // 承認済み申込（通知の生成に使う）
 
   // Supabaseからコーチ一覧を取得
   useEffect(() => {
@@ -149,38 +150,65 @@ const OshiCoachingApp = () => {
       // このコーチへの承認済み申込を取得
       const { data: apps } = await supabase
         .from('applications')
-        .select('client_id')
+        .select('id, client_id, created_at')
         .eq('coach_id', session.user.id)
-        .eq('status', 'approved');
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false });
+      setApprovedApps(apps || []);
       if (!apps || apps.length === 0) {
         setRealClients([]);
         return;
       }
       const clientIds = apps.map(a => a.client_id);
-      const [{ data: users }, { data: schedules }] = await Promise.all([
+      const [{ data: users }, { data: schedules }, { data: sentMsgs }, { data: recvMsgs }] = await Promise.all([
         supabase.from('users').select('id, name, email, created_at').in('id', clientIds),
+        // 次回セッションと実施済み回数の両方を出すため、日付で絞らず全件取得する
         supabase.from('schedules')
           .select('client_id, date, time')
           .eq('coach_id', session.user.id)
-          .gte('date', new Date().toISOString().split('T')[0])
           .order('date', { ascending: true })
+          .order('time', { ascending: true }),
+        // 最終メッセージ日の算出用（送信ぶん）
+        supabase.from('messages').select('receiver_id, created_at')
+          .eq('sender_id', session.user.id).in('receiver_id', clientIds)
+          .order('created_at', { ascending: false }),
+        // 最終メッセージ日の算出用（受信ぶん）
+        supabase.from('messages').select('sender_id, created_at')
+          .eq('receiver_id', session.user.id).in('sender_id', clientIds)
+          .order('created_at', { ascending: false })
       ]);
       if (users) {
-        // クライアントごとに最近の次回セッションをマップ
-        const nextSessionMap = {};
-        if (schedules) {
-          schedules.forEach(s => {
-            if (!nextSessionMap[s.client_id]) {
-              nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
-            }
-          });
-        }
+        const now = new Date();
+        const toDateTime = (s) => new Date(`${s.date}T${(s.time || '00:00').slice(0, 5)}:00`);
+        const nextSessionMap = {};   // まだ来ていない直近の予定
+        const sessionCountMap = {};  // 日時が過ぎた予定の件数 ＝ 実施済みセッション回数
+        (schedules || []).forEach(s => {
+          const dt = toDateTime(s);
+          if (isNaN(dt.getTime())) return;
+          if (dt < now) {
+            sessionCountMap[s.client_id] = (sessionCountMap[s.client_id] || 0) + 1;
+          } else if (!nextSessionMap[s.client_id]) {
+            nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
+          }
+        });
+
+        // クライアントごとの最終メッセージ日（送信・受信のうち新しいほう）
+        const lastMessageMap = {};
+        const noteLatest = (partnerId, createdAt) => {
+          if (!partnerId || !createdAt) return;
+          if (!lastMessageMap[partnerId] || createdAt > lastMessageMap[partnerId]) {
+            lastMessageMap[partnerId] = createdAt;
+          }
+        };
+        (sentMsgs || []).forEach(m => noteLatest(m.receiver_id, m.created_at));
+        (recvMsgs || []).forEach(m => noteLatest(m.sender_id, m.created_at));
+
         setRealClients(users.map(u => ({
           id: u.id,
           name: u.name || u.email || '名前未設定',
           joinDate: u.created_at?.split('T')[0] || '-',
-          sessions: 0,
-          lastMessage: '-',
+          sessions: sessionCountMap[u.id] || 0,
+          lastMessage: lastMessageMap[u.id] ? lastMessageMap[u.id].split('T')[0] : '-',
           nextSession: nextSessionMap[u.id] || '-',
           memo: '',
           files: []
@@ -341,9 +369,10 @@ const OshiCoachingApp = () => {
   });
   // 読み込みが終わるまで保存させないためのフラグ
   const [coachProfileLoaded, setCoachProfileLoaded] = useState(false);
-  const [notifications, setNotifications] = useState([
-    // コーチへの通知は管理画面で承認後に届く
-  ]);
+  // 通知は承認済み申込とクライアントからの新着メッセージから組み立てる（下のuseEffect）
+  const [notifications, setNotifications] = useState([]);
+  // 既読状態はDBに列が無いのでブラウザに保存する（null = まだ読み込んでいない）
+  const [notifReadIds, setNotifReadIds] = useState(null);
   
   // クライアント（ファン）側の画面分岐用
   const [clientViewType, setClientViewType] = useState(null); // 'search' or 'mycoach'
@@ -368,50 +397,6 @@ const OshiCoachingApp = () => {
   const [clientFiles, setClientFiles] = useState([]);
 
 
-  const clients = [
-    { 
-      id: 1, 
-      name: '佐藤太郎', 
-      coachId: 1, 
-      joinDate: '2024-01-15', 
-      sessions: 5, 
-      lastMessage: '2024-01-25',
-      nextSession: '2024-01-30 14:00',
-      memo: '前回のセッションで目標設定について話し合い。次回はアクションプランの進捗確認。',
-      files: [
-        { id: 1, name: '目標シート.xlsx', uploadDate: '2024-01-20', size: '45KB' },
-        { id: 2, name: '進捗レポート.pdf', uploadDate: '2024-01-22', size: '128KB' }
-      ]
-    },
-    { 
-      id: 2, 
-      name: '鈴木花子', 
-      coachId: 1, 
-      joinDate: '2024-01-20', 
-      sessions: 3, 
-      lastMessage: '2024-01-26',
-      nextSession: '2024-02-01 10:00',
-      memo: 'キャリアチェンジを検討中。業界研究のサポートが必要。',
-      files: [
-        { id: 3, name: '自己分析シート.xlsx', uploadDate: '2024-01-21', size: '32KB' }
-      ]
-    },
-    { 
-      id: 3, 
-      name: '高橋健太', 
-      coachId: 1, 
-      joinDate: '2023-12-10', 
-      sessions: 12, 
-      lastMessage: '2024-01-27',
-      nextSession: '2024-01-29 16:00',
-      memo: '長期クライアント。継続的な成長サポート中。自己効力感が高まってきている。',
-      files: [
-        { id: 4, name: '月次振り返り_1月.xlsx', uploadDate: '2024-01-25', size: '58KB' },
-        { id: 5, name: '年間目標.pdf', uploadDate: '2024-01-10', size: '95KB' },
-        { id: 6, name: 'セッション記録.docx', uploadDate: '2024-01-27', size: '112KB' }
-      ]
-    },
-  ];
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -432,6 +417,7 @@ const OshiCoachingApp = () => {
         sender: m.sender_id === userId ? 'me' : 'other',
         text: m.text,
         time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        created_at: m.created_at,
         sender_id: m.sender_id,
         receiver_id: m.receiver_id
       })));
@@ -461,6 +447,7 @@ const OshiCoachingApp = () => {
           sender: m.sender_id === userId ? 'me' : 'other',
           text: m.text,
           time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          created_at: m.created_at,
           sender_id: m.sender_id,
           receiver_id: m.receiver_id
         }]);
@@ -482,6 +469,108 @@ const OshiCoachingApp = () => {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, adminChatMessages, selectedClient, selectedCoach, clientDetailView, clientMyCoachTab]);
+
+  // ===== 通知 =====
+  const notifStorageKey = session?.user?.id ? `oshi-notif-read-${session.user.id}` : null;
+
+  // 既読IDをブラウザから復元
+  useEffect(() => {
+    if (!notifStorageKey) return;
+    try {
+      const raw = window.localStorage.getItem(notifStorageKey);
+      setNotifReadIds(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      // 保存領域が使えない環境でも通知自体は表示できるようにする
+      setNotifReadIds(new Set());
+    }
+  }, [notifStorageKey]);
+
+  const markNotificationsRead = (ids) => {
+    if (!ids || ids.length === 0) return;
+    setNotifications(prev => prev.map(n => (ids.includes(n.id) ? { ...n, read: true } : n)));
+    setNotifReadIds(prev => {
+      const next = new Set(prev || []);
+      ids.forEach(id => next.add(id));
+      if (notifStorageKey) {
+        try {
+          window.localStorage.setItem(notifStorageKey, JSON.stringify([...next]));
+        } catch {
+          // 保存できなくてもこのセッション中は既読として扱う
+        }
+      }
+      return next;
+    });
+  };
+
+  // 通知の組み立て
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user?.id || notifReadIds === null) return;
+    const myId = session.user.id;
+    const nameOf = (id) => realClients.find(c => c.id === id)?.name || 'クライアント';
+    const items = [];
+
+    // 1) 運営に承認された新しいクライアント
+    approvedApps.forEach(a => {
+      items.push({
+        id: `app-${a.id}`,
+        type: 'application',
+        clientId: a.client_id,
+        clientName: nameOf(a.client_id),
+        date: a.created_at?.split('T')[0] || '',
+        sortKey: a.created_at || '',
+        message: `${nameOf(a.client_id)}さんの申し込みが承認されました。コーチングを開始できます。`,
+      });
+    });
+
+    // 2) クライアントからの新着メッセージ（相手ごとに最新の1件だけ）
+    const latestInbound = {};
+    messages.forEach(m => {
+      if (m.sender_id === myId) return;
+      if (!realClients.some(c => c.id === m.sender_id)) return;
+      const cur = latestInbound[m.sender_id];
+      if (!cur || (m.created_at || '') > (cur.created_at || '')) latestInbound[m.sender_id] = m;
+    });
+    Object.values(latestInbound).forEach(m => {
+      items.push({
+        id: `msg-${m.id}`,
+        type: 'message',
+        clientId: m.sender_id,
+        clientName: nameOf(m.sender_id),
+        date: m.created_at?.split('T')[0] || '',
+        sortKey: m.created_at || '',
+        message: m.text && m.text.length > 60 ? `${m.text.slice(0, 60)}…` : (m.text || ''),
+      });
+    });
+
+    items.sort((a, b) => String(b.sortKey).localeCompare(String(a.sortKey)));
+    setNotifications(items.map(n => ({ ...n, read: notifReadIds.has(n.id) })));
+  }, [userType, session?.user?.id, approvedApps, realClients, messages, notifReadIds]);
+
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
+  // クライアント詳細を開く（一覧からも通知からも使う）
+  const openClient = async (client) => {
+    if (!client || !session?.user) return;
+    setSelectedClient(client);
+    const [{ data: memoData }, { data: filesData }] = await Promise.all([
+      supabase.from('coach_memos').select('memo')
+        .eq('coach_id', session.user.id).eq('client_id', client.id).single(),
+      supabase.from('files').select('*')
+        .eq('coach_id', session.user.id).eq('client_id', client.id)
+        .order('created_at', { ascending: false })
+    ]);
+    setMemoText(memoData?.memo || '');
+    setSelectedClient({
+      ...client,
+      files: (filesData || []).map(f => ({
+        id: f.id,
+        name: f.file_name,
+        uploadDate: f.created_at?.split('T')[0],
+        size: f.file_size,
+        path: f.file_path
+      }))
+    });
+  };
 
   // メッセージ内のURLをリンクに変換して表示
   const renderMessageText = (text, isMine) => {
@@ -525,6 +614,7 @@ const OshiCoachingApp = () => {
         sender: 'me',
         text: data.text,
         time: new Date(data.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        created_at: data.created_at,
         sender_id: data.sender_id,
         receiver_id: data.receiver_id
       }]);
@@ -723,6 +813,11 @@ const OshiCoachingApp = () => {
                   >
                     <Settings className="w-5 h-5" />
                     <span>設定</span>
+                    {unreadNotificationCount > 0 && (
+                      <span className="ml-auto min-w-[20px] h-5 px-1 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                        {unreadNotificationCount}
+                      </span>
+                    )}
                   </button>
                 </nav>
               </div>
@@ -814,9 +909,9 @@ const OshiCoachingApp = () => {
                           }}
                         >
                           {tab.label}
-                          {tab.key === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
+                          {tab.key === 'notifications' && unreadNotificationCount > 0 && (
                             <span style={{ position: 'absolute', top: '-4px', right: '-4px', width: '18px', height: '18px', backgroundColor: '#ef4444', color: '#fff', fontSize: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {notifications.filter(n => !n.read).length}
+                              {unreadNotificationCount}
                             </span>
                           )}
                         </button>
@@ -1058,14 +1153,13 @@ const OshiCoachingApp = () => {
                           <div>
                             <h3 className="font-bold text-gray-800 mb-1">通知</h3>
                             <p className="text-sm text-gray-600">
-                              未読 {notifications.filter(n => !n.read).length}件
+                              未読 {unreadNotificationCount}件
                             </p>
                           </div>
-                          {notifications.filter(n => !n.read).length > 0 && (
+                          {unreadNotificationCount > 0 && (
                             <button
                               onClick={() => {
-                                setNotifications(notifications.map(n => ({...n, read: true})));
-                                alert('すべての通知を既読にしました');
+                                markNotificationsRead(notifications.map(n => n.id));
                               }}
                               className="text-sm text-pink-600 hover:text-pink-700"
                             >
@@ -1083,35 +1177,28 @@ const OshiCoachingApp = () => {
                             {notifications.map(notification => (
                               <div
                                 key={notification.id}
-                                onClick={() => {
-                                  // メッセージタイプの場合は該当クライアントのメッセージ画面に遷移
-                                  if (notification.type === 'message') {
-                                    const client = clients.find(c => c.id === notification.clientId);
-                                    if (client) {
-                                      setSelectedClient(client);
-                                      setMemoText(client.memo);
-                                      setClientDetailView('sessions');
-                                      setCurrentView('dashboard');
-                                      setSettingsTab('account');
-                                      // 通知を既読にする
-                                      setNotifications(notifications.map(n =>
-                                        n.id === notification.id ? {...n, read: true} : n
-                                      ));
-                                    }
-                                  }
+                                onClick={async () => {
+                                  markNotificationsRead([notification.id]);
+                                  // 該当クライアントの画面へ移動する
+                                  const client = realClients.find(c => c.id === notification.clientId);
+                                  if (!client) return;
+                                  setClientDetailView(notification.type === 'message' ? 'sessions' : 'overview');
+                                  setCurrentView('dashboard');
+                                  setSettingsTab('account');
+                                  await openClient(client);
                                 }}
                                 className={`p-4 rounded-lg border-2 transition-all ${
                                   notification.read
                                     ? 'bg-white border-gray-200'
                                     : 'bg-pink-50 border-pink-300'
-                                } ${notification.type === 'message' ? 'cursor-pointer hover:shadow-md' : ''}`}
+                                } cursor-pointer hover:shadow-md`}
                               >
                                 <div className="flex items-start gap-3">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-2">
                                       {notification.type === 'application' && (
                                         <span className="bg-pink-500 text-white px-2 py-1 rounded text-xs font-medium">
-                                          新規申し込み
+                                          新規クライアント
                                         </span>
                                       )}
                                       {notification.type === 'message' && (
@@ -1125,9 +1212,11 @@ const OshiCoachingApp = () => {
                                     <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-200">
                                       {notification.message}
                                     </p>
-                                    {notification.type === 'message' && (
-                                      <p className="text-xs text-pink-600 mt-2">クリックしてメッセージを確認 →</p>
-                                    )}
+                                    <p className="text-xs text-pink-600 mt-2">
+                                      {notification.type === 'message'
+                                        ? 'クリックしてメッセージを確認 →'
+                                        : 'クリックしてクライアント情報を確認 →'}
+                                    </p>
                                   </div>
                                 </div>
                               </div>
@@ -1452,28 +1541,7 @@ const OshiCoachingApp = () => {
                     {realClients.map(client => (
                       <div
                         key={client.id}
-                        onClick={async () => {
-                          setSelectedClient(client);
-                          // メモとファイルを並行取得
-                          const [{ data: memoData }, { data: filesData }] = await Promise.all([
-                            supabase.from('coach_memos').select('memo')
-                              .eq('coach_id', session.user.id).eq('client_id', client.id).single(),
-                            supabase.from('files').select('*')
-                              .eq('coach_id', session.user.id).eq('client_id', client.id)
-                              .order('created_at', { ascending: false })
-                          ]);
-                          setMemoText(memoData?.memo || '');
-                          setSelectedClient({
-                            ...client,
-                            files: (filesData || []).map(f => ({
-                              id: f.id,
-                              name: f.file_name,
-                              uploadDate: f.created_at?.split('T')[0],
-                              size: f.file_size,
-                              path: f.file_path
-                            }))
-                          });
-                        }}
+                        onClick={() => openClient(client)}
                         className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-100 hover:border-pink-200"
                       >
                         <div className="flex items-start justify-between mb-4">
