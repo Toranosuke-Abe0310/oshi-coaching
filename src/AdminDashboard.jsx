@@ -43,7 +43,8 @@ const AdminDashboard = () => {
     introduction: '',
     sessionPrice: '',
     availableDays: [],
-    image: '🌸'
+    image: '🌸',
+    maxClients: '5'
   });
   const [coachFormLoading, setCoachFormLoading] = useState(false);
   const [coachFormMessage, setCoachFormMessage] = useState({ type: '', text: '' });
@@ -325,7 +326,8 @@ const AdminDashboard = () => {
           session_price: coachForm.sessionPrice,
           available_days: coachForm.availableDays,
           image: coachForm.image,
-          clients_count: 0
+          clients_count: 0,
+          max_clients: coachForm.maxClients === '' ? null : parseInt(coachForm.maxClients)
         });
       if (coachError) throw new Error('coachesテーブルへの登録失敗: ' + coachError.message);
 
@@ -333,7 +335,7 @@ const AdminDashboard = () => {
       setCoachForm({
         userId: '', email: '', name: '', displayName: '',
         formerGroup: '', specialty: '', introduction: '',
-        sessionPrice: '', availableDays: [], image: '🌸'
+        sessionPrice: '', availableDays: [], image: '🌸', maxClients: '5'
       });
       fetchCoaches();
     } catch (err) {
@@ -634,6 +636,18 @@ const AdminDashboard = () => {
                     value={coachForm.sessionPrice}
                     onChange={e => setCoachForm({...coachForm, sessionPrice: e.target.value})}
                     placeholder="10,000円/60分"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">上限人数（空欄=無制限）</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={coachForm.maxClients}
+                    onChange={e => setCoachForm({...coachForm, maxClients: e.target.value})}
+                    placeholder="5"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
                   />
                 </div>

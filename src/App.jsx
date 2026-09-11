@@ -17,8 +17,14 @@ const OshiCoachingApp = () => {
       .eq('id', userId)
       .single();
     if (data) {
-      setUserType(data.user_type);
+      // user_typeがNULLのケースもあるので、その場合も状態を確定させる
+      setUserType(data.user_type || 'unknown');
       setUserData(data);
+    } else {
+      // usersテーブルに行が無い場合、userTypeをnullのままにすると
+      // ローディング表示が永久に続くので状態を確定させる
+      setUserType('unknown');
+      setUserData(null);
     }
   };
 
@@ -52,6 +58,7 @@ const OshiCoachingApp = () => {
   const [coaches, setCoaches] = useState([]);
   const [coachesLoading, setCoachesLoading] = useState(true);
   const [realClients, setRealClients] = useState([]); // Supabaseから取得した実際のクライアント
+  const [approvedApps, setApprovedApps] = useState([]); // 承認済み申込（通知の生成に使う）
 
   // Supabaseからコーチ一覧を取得
   useEffect(() => {
@@ -85,7 +92,7 @@ const OshiCoachingApp = () => {
           introduction: c.introduction || '',
           sessionPrice: c.session_price || '',
           availableDays: c.available_days || [],
-          maxClients: c.max_clients || null,
+          maxClients: c.max_clients ?? null,
           currentApplications: appCountMap[c.user_id] || 0,
         })));
       }
@@ -143,38 +150,65 @@ const OshiCoachingApp = () => {
       // このコーチへの承認済み申込を取得
       const { data: apps } = await supabase
         .from('applications')
-        .select('client_id')
+        .select('id, client_id, created_at')
         .eq('coach_id', session.user.id)
-        .eq('status', 'approved');
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false });
+      setApprovedApps(apps || []);
       if (!apps || apps.length === 0) {
         setRealClients([]);
         return;
       }
       const clientIds = apps.map(a => a.client_id);
-      const [{ data: users }, { data: schedules }] = await Promise.all([
+      const [{ data: users }, { data: schedules }, { data: sentMsgs }, { data: recvMsgs }] = await Promise.all([
         supabase.from('users').select('id, name, email, created_at').in('id', clientIds),
+        // 次回セッションと実施済み回数の両方を出すため、日付で絞らず全件取得する
         supabase.from('schedules')
           .select('client_id, date, time')
           .eq('coach_id', session.user.id)
-          .gte('date', new Date().toISOString().split('T')[0])
           .order('date', { ascending: true })
+          .order('time', { ascending: true }),
+        // 最終メッセージ日の算出用（送信ぶん）
+        supabase.from('messages').select('receiver_id, created_at')
+          .eq('sender_id', session.user.id).in('receiver_id', clientIds)
+          .order('created_at', { ascending: false }),
+        // 最終メッセージ日の算出用（受信ぶん）
+        supabase.from('messages').select('sender_id, created_at')
+          .eq('receiver_id', session.user.id).in('sender_id', clientIds)
+          .order('created_at', { ascending: false })
       ]);
       if (users) {
-        // クライアントごとに最近の次回セッションをマップ
-        const nextSessionMap = {};
-        if (schedules) {
-          schedules.forEach(s => {
-            if (!nextSessionMap[s.client_id]) {
-              nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
-            }
-          });
-        }
+        const now = new Date();
+        const toDateTime = (s) => new Date(`${s.date}T${(s.time || '00:00').slice(0, 5)}:00`);
+        const nextSessionMap = {};   // まだ来ていない直近の予定
+        const sessionCountMap = {};  // 日時が過ぎた予定の件数 ＝ 実施済みセッション回数
+        (schedules || []).forEach(s => {
+          const dt = toDateTime(s);
+          if (isNaN(dt.getTime())) return;
+          if (dt < now) {
+            sessionCountMap[s.client_id] = (sessionCountMap[s.client_id] || 0) + 1;
+          } else if (!nextSessionMap[s.client_id]) {
+            nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
+          }
+        });
+
+        // クライアントごとの最終メッセージ日（送信・受信のうち新しいほう）
+        const lastMessageMap = {};
+        const noteLatest = (partnerId, createdAt) => {
+          if (!partnerId || !createdAt) return;
+          if (!lastMessageMap[partnerId] || createdAt > lastMessageMap[partnerId]) {
+            lastMessageMap[partnerId] = createdAt;
+          }
+        };
+        (sentMsgs || []).forEach(m => noteLatest(m.receiver_id, m.created_at));
+        (recvMsgs || []).forEach(m => noteLatest(m.sender_id, m.created_at));
+
         setRealClients(users.map(u => ({
           id: u.id,
           name: u.name || u.email || '名前未設定',
           joinDate: u.created_at?.split('T')[0] || '-',
-          sessions: 0,
-          lastMessage: '-',
+          sessions: sessionCountMap[u.id] || 0,
+          lastMessage: lastMessageMap[u.id] ? lastMessageMap[u.id].split('T')[0] : '-',
           nextSession: nextSessionMap[u.id] || '-',
           memo: '',
           files: []
@@ -229,6 +263,8 @@ const OshiCoachingApp = () => {
           maxClients: data.max_clients != null ? String(data.max_clients) : ''
         });
       }
+      // 行が無かった場合も含めて、取得を試み終えたら保存を解禁する
+      setCoachProfileLoaded(true);
     };
     fetchCoachProfile();
   }, [userType, session]);
@@ -243,13 +279,17 @@ const OshiCoachingApp = () => {
   const adminSeenIds = useRef(new Set());
 
   // 運営ユーザーIDを取得 & メッセージ購読
+  // 購読解除は必ずuseEffectのcleanupで行う。setup内でcleanupをreturnしても
+  // その戻り値は捨てられるため、チャンネルが解除されず溜まり続けてしまう
   useEffect(() => {
-    if (userType !== 'coach' || !session?.user) return;
+    if (userType !== 'coach' || !session?.user?.id) return;
+    let channel = null;
+    let cancelled = false;
     const setup = async () => {
       // adminユーザーを取得
       const { data: adminUser } = await supabase
         .from('users').select('id').eq('user_type', 'admin').single();
-      if (!adminUser) return;
+      if (!adminUser || cancelled) return;
       setAdminUserId(adminUser.id);
       const coachId = session.user.id;
       // メッセージ取得
@@ -257,6 +297,7 @@ const OshiCoachingApp = () => {
         .from('messages').select('*')
         .or(`and(sender_id.eq.${coachId},receiver_id.eq.${adminUser.id}),and(sender_id.eq.${adminUser.id},receiver_id.eq.${coachId})`)
         .order('created_at', { ascending: true });
+      if (cancelled) return;
       if (msgs) {
         msgs.forEach(m => adminSeenIds.current.add(m.id));
         setAdminChatMessages(msgs.map(m => ({
@@ -266,7 +307,7 @@ const OshiCoachingApp = () => {
         })));
       }
       // リアルタイム購読
-      const channel = supabase.channel(`coach-admin-chat-${coachId}`)
+      channel = supabase.channel(`coach-admin-chat-${coachId}-${Date.now()}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
           const m = payload.new;
           if (adminSeenIds.current.has(m.id)) return;
@@ -280,10 +321,16 @@ const OshiCoachingApp = () => {
             time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
           }]);
         }).subscribe();
-      return () => supabase.removeChannel(channel);
+      // 購読完了前にアンマウント/再実行された場合はここで後始末
+      if (cancelled) { supabase.removeChannel(channel); channel = null; }
     };
     setup();
-  }, [userType, session]);
+    return () => {
+      cancelled = true;
+      if (channel) { supabase.removeChannel(channel); channel = null; }
+    };
+    // sessionオブジェクトはトークン更新のたびに別物になるため、user.idで比較する
+  }, [userType, session?.user?.id]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoText, setMemoText] = useState('');
@@ -308,19 +355,24 @@ const OshiCoachingApp = () => {
   
   // 設定画面用のstate
   const [settingsTab, setSettingsTab] = useState('account'); // 'account', 'profile', 'notifications'
+  // 初期値は空。ダミーの実名を入れておくと、DBからの読み込みが終わる前に
+  // 「保存する」を押されたときに他人の名前で自分のプロフィールを上書きしてしまう
   const [coachProfile, setCoachProfile] = useState({
-    displayName: '桜井 美咲',
-    formerGroup: 'StarLight',
-    specialty: 'キャリア相談',
-    introduction: 'アイドル時代の経験を活かし、夢に向かって頑張るあなたをサポートします。一緒に目標達成を目指しましょう!',
-    sessionPrice: '10,000円/60分',
-    availableDays: ['月', '水', '金'],
+    displayName: '',
+    formerGroup: '',
+    specialty: '',
+    introduction: '',
+    sessionPrice: '',
+    availableDays: [],
     image: '🌸',
     maxClients: ''
   });
-  const [notifications, setNotifications] = useState([
-    // コーチへの通知は管理画面で承認後に届く
-  ]);
+  // 読み込みが終わるまで保存させないためのフラグ
+  const [coachProfileLoaded, setCoachProfileLoaded] = useState(false);
+  // 通知は承認済み申込とクライアントからの新着メッセージから組み立てる（下のuseEffect）
+  const [notifications, setNotifications] = useState([]);
+  // 既読状態はDBに列が無いのでブラウザに保存する（null = まだ読み込んでいない）
+  const [notifReadIds, setNotifReadIds] = useState(null);
   
   // クライアント（ファン）側の画面分岐用
   const [clientViewType, setClientViewType] = useState(null); // 'search' or 'mycoach'
@@ -345,50 +397,6 @@ const OshiCoachingApp = () => {
   const [clientFiles, setClientFiles] = useState([]);
 
 
-  const clients = [
-    { 
-      id: 1, 
-      name: '佐藤太郎', 
-      coachId: 1, 
-      joinDate: '2024-01-15', 
-      sessions: 5, 
-      lastMessage: '2024-01-25',
-      nextSession: '2024-01-30 14:00',
-      memo: '前回のセッションで目標設定について話し合い。次回はアクションプランの進捗確認。',
-      files: [
-        { id: 1, name: '目標シート.xlsx', uploadDate: '2024-01-20', size: '45KB' },
-        { id: 2, name: '進捗レポート.pdf', uploadDate: '2024-01-22', size: '128KB' }
-      ]
-    },
-    { 
-      id: 2, 
-      name: '鈴木花子', 
-      coachId: 1, 
-      joinDate: '2024-01-20', 
-      sessions: 3, 
-      lastMessage: '2024-01-26',
-      nextSession: '2024-02-01 10:00',
-      memo: 'キャリアチェンジを検討中。業界研究のサポートが必要。',
-      files: [
-        { id: 3, name: '自己分析シート.xlsx', uploadDate: '2024-01-21', size: '32KB' }
-      ]
-    },
-    { 
-      id: 3, 
-      name: '高橋健太', 
-      coachId: 1, 
-      joinDate: '2023-12-10', 
-      sessions: 12, 
-      lastMessage: '2024-01-27',
-      nextSession: '2024-01-29 16:00',
-      memo: '長期クライアント。継続的な成長サポート中。自己効力感が高まってきている。',
-      files: [
-        { id: 4, name: '月次振り返り_1月.xlsx', uploadDate: '2024-01-25', size: '58KB' },
-        { id: 5, name: '年間目標.pdf', uploadDate: '2024-01-10', size: '95KB' },
-        { id: 6, name: 'セッション記録.docx', uploadDate: '2024-01-27', size: '112KB' }
-      ]
-    },
-  ];
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -409,6 +417,7 @@ const OshiCoachingApp = () => {
         sender: m.sender_id === userId ? 'me' : 'other',
         text: m.text,
         time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        created_at: m.created_at,
         sender_id: m.sender_id,
         receiver_id: m.receiver_id
       })));
@@ -438,6 +447,7 @@ const OshiCoachingApp = () => {
           sender: m.sender_id === userId ? 'me' : 'other',
           text: m.text,
           time: new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          created_at: m.created_at,
           sender_id: m.sender_id,
           receiver_id: m.receiver_id
         }]);
@@ -446,6 +456,121 @@ const OshiCoachingApp = () => {
 
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id]);
+
+  // メッセージ一覧のスクロールコンテナ用ref
+  // ファン側・コーチ側・「運営とチャット」の3箇所で使うが、同時にマウントされるのは
+  // 常に1つなのでrefは1つで足りる
+  const messagesScrollRef = useRef(null);
+
+  // メッセージは古い→新しい（最新が下）の順で描画するため、
+  // 表示切り替え時・メッセージ追加時に最下部へ自動スクロールする
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, adminChatMessages, selectedClient, selectedCoach, clientDetailView, clientMyCoachTab]);
+
+  // ===== 通知 =====
+  const notifStorageKey = session?.user?.id ? `oshi-notif-read-${session.user.id}` : null;
+
+  // 既読IDをブラウザから復元
+  useEffect(() => {
+    if (!notifStorageKey) return;
+    try {
+      const raw = window.localStorage.getItem(notifStorageKey);
+      setNotifReadIds(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      // 保存領域が使えない環境でも通知自体は表示できるようにする
+      setNotifReadIds(new Set());
+    }
+  }, [notifStorageKey]);
+
+  const markNotificationsRead = (ids) => {
+    if (!ids || ids.length === 0) return;
+    setNotifications(prev => prev.map(n => (ids.includes(n.id) ? { ...n, read: true } : n)));
+    setNotifReadIds(prev => {
+      const next = new Set(prev || []);
+      ids.forEach(id => next.add(id));
+      if (notifStorageKey) {
+        try {
+          window.localStorage.setItem(notifStorageKey, JSON.stringify([...next]));
+        } catch {
+          // 保存できなくてもこのセッション中は既読として扱う
+        }
+      }
+      return next;
+    });
+  };
+
+  // 通知の組み立て
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user?.id || notifReadIds === null) return;
+    const myId = session.user.id;
+    const nameOf = (id) => realClients.find(c => c.id === id)?.name || 'クライアント';
+    const items = [];
+
+    // 1) 運営に承認された新しいクライアント
+    approvedApps.forEach(a => {
+      items.push({
+        id: `app-${a.id}`,
+        type: 'application',
+        clientId: a.client_id,
+        clientName: nameOf(a.client_id),
+        date: a.created_at?.split('T')[0] || '',
+        sortKey: a.created_at || '',
+        message: `${nameOf(a.client_id)}さんの申し込みが承認されました。コーチングを開始できます。`,
+      });
+    });
+
+    // 2) クライアントからの新着メッセージ（相手ごとに最新の1件だけ）
+    const latestInbound = {};
+    messages.forEach(m => {
+      if (m.sender_id === myId) return;
+      if (!realClients.some(c => c.id === m.sender_id)) return;
+      const cur = latestInbound[m.sender_id];
+      if (!cur || (m.created_at || '') > (cur.created_at || '')) latestInbound[m.sender_id] = m;
+    });
+    Object.values(latestInbound).forEach(m => {
+      items.push({
+        id: `msg-${m.id}`,
+        type: 'message',
+        clientId: m.sender_id,
+        clientName: nameOf(m.sender_id),
+        date: m.created_at?.split('T')[0] || '',
+        sortKey: m.created_at || '',
+        message: m.text && m.text.length > 60 ? `${m.text.slice(0, 60)}…` : (m.text || ''),
+      });
+    });
+
+    items.sort((a, b) => String(b.sortKey).localeCompare(String(a.sortKey)));
+    setNotifications(items.map(n => ({ ...n, read: notifReadIds.has(n.id) })));
+  }, [userType, session?.user?.id, approvedApps, realClients, messages, notifReadIds]);
+
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
+  // クライアント詳細を開く（一覧からも通知からも使う）
+  const openClient = async (client) => {
+    if (!client || !session?.user) return;
+    setSelectedClient(client);
+    const [{ data: memoData }, { data: filesData }] = await Promise.all([
+      supabase.from('coach_memos').select('memo')
+        .eq('coach_id', session.user.id).eq('client_id', client.id).single(),
+      supabase.from('files').select('*')
+        .eq('coach_id', session.user.id).eq('client_id', client.id)
+        .order('created_at', { ascending: false })
+    ]);
+    setMemoText(memoData?.memo || '');
+    setSelectedClient({
+      ...client,
+      files: (filesData || []).map(f => ({
+        id: f.id,
+        name: f.file_name,
+        uploadDate: f.created_at?.split('T')[0],
+        size: f.file_size,
+        path: f.file_path
+      }))
+    });
+  };
 
   // メッセージ内のURLをリンクに変換して表示
   const renderMessageText = (text, isMine) => {
@@ -489,6 +614,7 @@ const OshiCoachingApp = () => {
         sender: 'me',
         text: data.text,
         time: new Date(data.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        created_at: data.created_at,
         sender_id: data.sender_id,
         receiver_id: data.receiver_id
       }]);
@@ -528,6 +654,65 @@ const OshiCoachingApp = () => {
   // ログインしていない場合
   if (!session) {
     return <Login />
+  }
+
+  // usersテーブルからuser_typeを取得中（確定するまでの一瞬の白画面を防ぐ）
+  if (userType === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <Heart className="w-16 h-16 text-pink-400 mx-auto mb-4 animate-pulse" />
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 運営(admin)アカウントでログインしている場合
+  if (userType === 'admin') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full mb-4">
+                <Heart className="w-8 h-8 text-white" fill="white" />
+              </div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
+              <p className="text-gray-600">運営アカウントでログイン中です</p>
+            </div>
+
+            <div className="mb-6 p-3 rounded-lg text-sm bg-pink-50 text-pink-600 border border-pink-200 text-center">
+              こちらはファン・コーチ向けの画面です。<br />
+              運営の操作は管理画面から行ってください。
+            </div>
+
+            <a
+              href="/admin"
+              className="block w-full py-3 rounded-lg font-medium text-white text-center transition-all bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl"
+            >
+              管理画面へ
+            </a>
+
+            <div className="mt-6 text-center">
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut()
+                  window.location.reload()
+                }}
+                className="text-pink-600 hover:text-pink-700 text-sm font-medium"
+              >
+                ログアウト
+              </button>
+            </div>
+          </div>
+
+          <p className="text-center text-sm text-gray-500 mt-6">
+            © 2026 推しコーチング運営事務局
+          </p>
+        </div>
+      </div>
+    )
   }
 
   // コーチ側のダッシュボード
@@ -628,6 +813,11 @@ const OshiCoachingApp = () => {
                   >
                     <Settings className="w-5 h-5" />
                     <span>設定</span>
+                    {unreadNotificationCount > 0 && (
+                      <span className="ml-auto min-w-[20px] h-5 px-1 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                        {unreadNotificationCount}
+                      </span>
+                    )}
                   </button>
                 </nav>
               </div>
@@ -651,7 +841,7 @@ const OshiCoachingApp = () => {
                         <p className="text-xs text-gray-500">運営事務局</p>
                       </div>
                     </div>
-                    <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+                    <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
                       {adminChatMessages.length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。運営へのご連絡はこちらからどうぞ！</p>
                       )}
@@ -719,9 +909,9 @@ const OshiCoachingApp = () => {
                           }}
                         >
                           {tab.label}
-                          {tab.key === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
+                          {tab.key === 'notifications' && unreadNotificationCount > 0 && (
                             <span style={{ position: 'absolute', top: '-4px', right: '-4px', width: '18px', height: '18px', backgroundColor: '#ef4444', color: '#fff', fontSize: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {notifications.filter(n => !n.read).length}
+                              {unreadNotificationCount}
                             </span>
                           )}
                         </button>
@@ -927,7 +1117,9 @@ const OshiCoachingApp = () => {
                         </div>
 
                         <button
+                          disabled={!coachProfileLoaded}
                           onClick={async () => {
+                            if (!coachProfileLoaded) return;
                             const { error } = await supabase.from('coaches').update({
                               display_name: coachProfile.displayName,
                               former_group: coachProfile.formerGroup,
@@ -941,9 +1133,13 @@ const OshiCoachingApp = () => {
                             if (error) { alert('保存に失敗しました: ' + error.message); return; }
                             alert('プロフィールを保存しました');
                           }}
-                          className="w-full mt-6 px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors font-medium"
+                          className={`w-full mt-6 px-6 py-3 text-white rounded-lg transition-colors font-medium ${
+                            coachProfileLoaded
+                              ? 'bg-pink-500 hover:bg-pink-600'
+                              : 'bg-gray-400 cursor-not-allowed'
+                          }`}
                         >
-                          保存する
+                          {coachProfileLoaded ? '保存する' : '読み込み中...'}
                         </button>
                       </div>
                     </div>
@@ -957,14 +1153,13 @@ const OshiCoachingApp = () => {
                           <div>
                             <h3 className="font-bold text-gray-800 mb-1">通知</h3>
                             <p className="text-sm text-gray-600">
-                              未読 {notifications.filter(n => !n.read).length}件
+                              未読 {unreadNotificationCount}件
                             </p>
                           </div>
-                          {notifications.filter(n => !n.read).length > 0 && (
+                          {unreadNotificationCount > 0 && (
                             <button
                               onClick={() => {
-                                setNotifications(notifications.map(n => ({...n, read: true})));
-                                alert('すべての通知を既読にしました');
+                                markNotificationsRead(notifications.map(n => n.id));
                               }}
                               className="text-sm text-pink-600 hover:text-pink-700"
                             >
@@ -982,35 +1177,28 @@ const OshiCoachingApp = () => {
                             {notifications.map(notification => (
                               <div
                                 key={notification.id}
-                                onClick={() => {
-                                  // メッセージタイプの場合は該当クライアントのメッセージ画面に遷移
-                                  if (notification.type === 'message') {
-                                    const client = clients.find(c => c.id === notification.clientId);
-                                    if (client) {
-                                      setSelectedClient(client);
-                                      setMemoText(client.memo);
-                                      setClientDetailView('sessions');
-                                      setCurrentView('dashboard');
-                                      setSettingsTab('account');
-                                      // 通知を既読にする
-                                      setNotifications(notifications.map(n =>
-                                        n.id === notification.id ? {...n, read: true} : n
-                                      ));
-                                    }
-                                  }
+                                onClick={async () => {
+                                  markNotificationsRead([notification.id]);
+                                  // 該当クライアントの画面へ移動する
+                                  const client = realClients.find(c => c.id === notification.clientId);
+                                  if (!client) return;
+                                  setClientDetailView(notification.type === 'message' ? 'sessions' : 'overview');
+                                  setCurrentView('dashboard');
+                                  setSettingsTab('account');
+                                  await openClient(client);
                                 }}
                                 className={`p-4 rounded-lg border-2 transition-all ${
                                   notification.read
                                     ? 'bg-white border-gray-200'
                                     : 'bg-pink-50 border-pink-300'
-                                } ${notification.type === 'message' ? 'cursor-pointer hover:shadow-md' : ''}`}
+                                } cursor-pointer hover:shadow-md`}
                               >
                                 <div className="flex items-start gap-3">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-2">
                                       {notification.type === 'application' && (
                                         <span className="bg-pink-500 text-white px-2 py-1 rounded text-xs font-medium">
-                                          新規申し込み
+                                          新規クライアント
                                         </span>
                                       )}
                                       {notification.type === 'message' && (
@@ -1024,9 +1212,11 @@ const OshiCoachingApp = () => {
                                     <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-200">
                                       {notification.message}
                                     </p>
-                                    {notification.type === 'message' && (
-                                      <p className="text-xs text-pink-600 mt-2">クリックしてメッセージを確認 →</p>
-                                    )}
+                                    <p className="text-xs text-pink-600 mt-2">
+                                      {notification.type === 'message'
+                                        ? 'クリックしてメッセージを確認 →'
+                                        : 'クリックしてクライアント情報を確認 →'}
+                                    </p>
                                   </div>
                                 </div>
                               </div>
@@ -1351,28 +1541,7 @@ const OshiCoachingApp = () => {
                     {realClients.map(client => (
                       <div
                         key={client.id}
-                        onClick={async () => {
-                          setSelectedClient(client);
-                          // メモとファイルを並行取得
-                          const [{ data: memoData }, { data: filesData }] = await Promise.all([
-                            supabase.from('coach_memos').select('memo')
-                              .eq('coach_id', session.user.id).eq('client_id', client.id).single(),
-                            supabase.from('files').select('*')
-                              .eq('coach_id', session.user.id).eq('client_id', client.id)
-                              .order('created_at', { ascending: false })
-                          ]);
-                          setMemoText(memoData?.memo || '');
-                          setSelectedClient({
-                            ...client,
-                            files: (filesData || []).map(f => ({
-                              id: f.id,
-                              name: f.file_name,
-                              uploadDate: f.created_at?.split('T')[0],
-                              size: f.file_size,
-                              path: f.file_path
-                            }))
-                          });
-                        }}
+                        onClick={() => openClient(client)}
                         className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-100 hover:border-pink-200"
                       >
                         <div className="flex items-start justify-between mb-4">
@@ -1409,7 +1578,11 @@ const OshiCoachingApp = () => {
                 </div>
               )}
 
-              {selectedClient && (
+              {/* クライアント詳細はクライアント一覧タブ専用。
+                  currentViewで絞らないと、詳細を開いたまま他のタブに切り替えたときに
+                  そのタブの内容と詳細が同時に表示され、メッセージ一覧のスクロール
+                  コンテナも2つ同時にマウントされてしまう */}
+              {currentView === 'dashboard' && selectedClient && (
                 <div>
                   <button
                     onClick={() => {
@@ -1686,7 +1859,7 @@ const OshiCoachingApp = () => {
                       {clientDetailView === 'sessions' && (
                         <div>
                           <h3 className="text-lg font-bold text-gray-800 mb-4">メッセージ</h3>
-                          <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+                          <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
                             {messages
                               .filter(m => {
                                 const myId = session?.user?.id;
@@ -1694,7 +1867,6 @@ const OshiCoachingApp = () => {
                                 return (m.sender_id === myId && m.receiver_id === partnerId) ||
                                        (m.sender_id === partnerId && m.receiver_id === myId);
                               })
-                              .slice().reverse()
                               .map(msg => (
                               <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs px-4 py-2 rounded-lg ${
@@ -1911,6 +2083,26 @@ const OshiCoachingApp = () => {
                         onClick={async () => {
                           if (!applicationMessage.trim()) { alert('メッセージを入力してください'); return; }
                           if (!currentCoach?.user_id) { alert('コーチ情報が取得できませんでした'); return; }
+                          // 画面を開いてから他の人が申し込んで満員になっている可能性があるため、
+                          // 送信直前に最新の申し込み数を取り直して上限を再チェックする
+                          const { data: latestCoach } = await supabase
+                            .from('coaches').select('max_clients')
+                            .eq('user_id', currentCoach.user_id).single();
+                          const limit = latestCoach?.max_clients ?? null;
+                          if (limit != null) {
+                            const { count } = await supabase
+                              .from('applications')
+                              .select('id', { count: 'exact', head: true })
+                              .eq('coach_id', currentCoach.user_id)
+                              .in('status', ['pending', 'approved']);
+                            if ((count ?? 0) >= limit) {
+                              alert('申し訳ありません。このコーチは満員になりました。');
+                              setCoaches(prev => prev.map(c => c.user_id === currentCoach.user_id
+                                ? { ...c, maxClients: limit, currentApplications: count ?? 0 }
+                                : c));
+                              return;
+                            }
+                          }
                           const { error } = await supabase.from('applications').insert({
                             client_id: session.user.id,
                             coach_id: currentCoach.user_id,
@@ -2136,7 +2328,7 @@ const OshiCoachingApp = () => {
           {/* メッセージエリア */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ display: clientMyCoachTab === 'files' ? 'none' : 'block' }}>
             {/* メッセージ一覧（固定高さ・安定スクロール） */}
-            <div style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
+            <div ref={messagesScrollRef} style={{ overflowY: 'auto', maxHeight: '420px', minHeight: '200px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', overscrollBehavior: 'contain' }}>
               {(() => {
                 const myId = session?.user?.id;
                 const partnerId = selectedCoach?.user_id;
@@ -2147,7 +2339,7 @@ const OshiCoachingApp = () => {
                 if (filtered.length === 0) return (
                   <p className="text-gray-400 text-sm text-center py-8">まだメッセージがありません。最初のメッセージを送ってみましょう！</p>
                 );
-                return filtered.slice().reverse().map(msg => (
+                return filtered.map(msg => (
                   <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
                       msg.sender === 'me'
@@ -2194,6 +2386,52 @@ const OshiCoachingApp = () => {
       </div>
     );
   }
+
+  // どの分岐にも当てはまらない場合のフォールバック
+  // （undefinedを返して画面が真っ白になる経路をなくすのが目的）
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full mb-4">
+              <Heart className="w-8 h-8 text-white" fill="white" />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
+            <p className="text-gray-600">アカウント情報を読み込めませんでした</p>
+          </div>
+
+          <div className="mb-6 p-3 rounded-lg text-sm bg-red-50 text-red-600 border border-red-200 text-center">
+            お手数ですが、再読み込みをお試しください。<br />
+            解決しない場合は運営までお問い合わせください。
+          </div>
+
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full py-3 rounded-lg font-medium text-white transition-all bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl"
+          >
+            再読み込み
+          </button>
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut()
+                window.location.reload()
+              }}
+              className="text-pink-600 hover:text-pink-700 text-sm font-medium"
+            >
+              ログアウト
+            </button>
+          </div>
+        </div>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          © 2026 推しコーチング運営事務局
+        </p>
+      </div>
+    </div>
+  );
 };
 
 export default OshiCoachingApp;
