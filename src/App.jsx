@@ -59,6 +59,8 @@ const OshiCoachingApp = () => {
   const [coachesLoading, setCoachesLoading] = useState(true);
   const [realClients, setRealClients] = useState([]); // Supabaseから取得した実際のクライアント
   const [approvedApps, setApprovedApps] = useState([]); // 承認済み申込（通知の生成に使う）
+  // 予定の実施済み/キャンセルを切り替えたときに、クライアント一覧の集計を取り直すためのキー
+  const [clientsRefreshKey, setClientsRefreshKey] = useState(0);
 
   // Supabaseからコーチ一覧を取得
   useEffect(() => {
@@ -164,7 +166,7 @@ const OshiCoachingApp = () => {
         supabase.from('users').select('id, name, email, created_at').in('id', clientIds),
         // 次回セッションと実施済み回数の両方を出すため、日付で絞らず全件取得する
         supabase.from('schedules')
-          .select('client_id, date, time')
+          .select('client_id, date, time, status')
           .eq('coach_id', session.user.id)
           .order('date', { ascending: true })
           .order('time', { ascending: true }),
@@ -180,14 +182,20 @@ const OshiCoachingApp = () => {
       if (users) {
         const now = new Date();
         const toDateTime = (s) => new Date(`${s.date}T${(s.time || '00:00').slice(0, 5)}:00`);
-        const nextSessionMap = {};   // まだ来ていない直近の予定
-        const sessionCountMap = {};  // 日時が過ぎた予定の件数 ＝ 実施済みセッション回数
+        const nextSessionMap = {};   // これから行う直近の予定
+        const sessionCountMap = {};  // statusが'completed'の件数 ＝ 実施済みセッション回数
         (schedules || []).forEach(s => {
-          const dt = toDateTime(s);
-          if (isNaN(dt.getTime())) return;
-          if (dt < now) {
+          // 実施済みはコーチが明示的に押したものだけを数える。
+          // 日時が過ぎただけの予定は、ドタキャンや延期の可能性があるので数えない
+          if (s.status === 'completed') {
             sessionCountMap[s.client_id] = (sessionCountMap[s.client_id] || 0) + 1;
-          } else if (!nextSessionMap[s.client_id]) {
+            return;
+          }
+          // 次回セッションの候補は、まだ日時が来ていない'scheduled'のものだけ
+          if (s.status !== 'scheduled') return;
+          const dt = toDateTime(s);
+          if (isNaN(dt.getTime()) || dt < now) return;
+          if (!nextSessionMap[s.client_id]) {
             nextSessionMap[s.client_id] = `${s.date} ${s.time}`;
           }
         });
@@ -216,7 +224,7 @@ const OshiCoachingApp = () => {
       }
     };
     fetchClients();
-  }, [userType, session]);
+  }, [userType, session, clientsRefreshKey]);
 
   // コーチ側: Supabaseからスケジュール取得
   useEffect(() => {
@@ -235,7 +243,8 @@ const OshiCoachingApp = () => {
           date: s.date,
           time: s.time,
           duration: s.duration,
-          type: s.type
+          type: s.type,
+          status: s.status || 'scheduled'
         })));
       }
     };
@@ -1253,24 +1262,58 @@ const OshiCoachingApp = () => {
                         const eventDate = new Date(event.date + ' ' + event.time);
                         const now = new Date();
                         const isPast = eventDate < now;
-                        
+                        const status = event.status || 'scheduled';
+                        const isDone = status === 'completed';
+                        const isCancelled = status === 'cancelled';
+                        // 状態を変えて画面とDBの両方を更新する
+                        const changeStatus = async (next) => {
+                          const { error } = await supabase
+                            .from('schedules').update({ status: next }).eq('id', event.id);
+                          if (error) { alert('更新に失敗しました: ' + error.message); return; }
+                          setScheduleEvents(prev => prev.map(e =>
+                            e.id === event.id ? { ...e, status: next } : e));
+                          // セッション回数と次回セッションの表示を作り直す
+                          setClientsRefreshKey(k => k + 1);
+                        };
+
                         return (
                           <div
                             key={event.id}
                             className={`bg-white rounded-xl p-6 shadow-sm border transition-all ${
-                              isPast 
-                                ? 'border-gray-200 opacity-60' 
-                                : 'border-pink-200 hover:shadow-md'
+                              isCancelled
+                                ? 'border-gray-200 opacity-50'
+                                : isDone
+                                  ? 'border-green-200'
+                                  : isPast
+                                    ? 'border-gray-200 opacity-60'
+                                    : 'border-pink-200 hover:shadow-md'
                             }`}
                           >
                             <div className="flex items-start justify-between">
                               <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
-                                  <div className={`w-3 h-3 rounded-full ${isPast ? 'bg-gray-400' : 'bg-pink-500'}`}></div>
+                                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                                  <div className={`w-3 h-3 rounded-full ${
+                                    isCancelled ? 'bg-gray-300' : isDone ? 'bg-green-500' : isPast ? 'bg-gray-400' : 'bg-pink-500'
+                                  }`}></div>
                                   <h3 className="text-lg font-bold text-gray-800">{event.clientName}</h3>
                                   <span className="bg-pink-100 text-pink-600 px-2 py-1 rounded text-xs">
                                     {event.type}
                                   </span>
+                                  {isDone && (
+                                    <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-medium">
+                                      実施済み
+                                    </span>
+                                  )}
+                                  {isCancelled && (
+                                    <span className="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-medium">
+                                      キャンセル
+                                    </span>
+                                  )}
+                                  {!isDone && !isCancelled && isPast && (
+                                    <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-medium">
+                                      未記録
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="ml-6 space-y-1">
                                   <div className="flex items-center gap-2 text-gray-600">
@@ -1282,12 +1325,38 @@ const OshiCoachingApp = () => {
                                   </div>
                                 </div>
                               </div>
-                              <div className="flex gap-2">
+                              <div className="flex gap-2 items-start shrink-0">
+                                {/* 実施済み/キャンセルは、日時が過ぎた予定にだけ出す */}
+                                {isPast && !isDone && !isCancelled && (
+                                  <>
+                                    <button
+                                      onClick={() => changeStatus('completed')}
+                                      className="px-3 py-1 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600"
+                                    >
+                                      実施済み
+                                    </button>
+                                    <button
+                                      onClick={() => changeStatus('cancelled')}
+                                      className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-lg text-sm border border-gray-300"
+                                    >
+                                      キャンセル
+                                    </button>
+                                  </>
+                                )}
+                                {(isDone || isCancelled) && (
+                                  <button
+                                    onClick={() => changeStatus('scheduled')}
+                                    className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-lg text-sm"
+                                  >
+                                    戻す
+                                  </button>
+                                )}
                                 <button
                                   onClick={async () => {
                                     if (confirm('この予定を削除しますか?')) {
                                       await supabase.from('schedules').delete().eq('id', event.id);
                                       setScheduleEvents(prev => prev.filter(e => e.id !== event.id));
+                                      setClientsRefreshKey(k => k + 1);
                                     }
                                   }}
                                   className="px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg text-sm"
@@ -1446,7 +1515,8 @@ const OshiCoachingApp = () => {
                                 date: savedSchedule.date,
                                 time: savedSchedule.time,
                                 duration: savedSchedule.duration,
-                                type: savedSchedule.type
+                                type: savedSchedule.type,
+                                status: savedSchedule.status || 'scheduled'
                               };
                               setScheduleEvents(prev => [...prev, newEvent]);
 
