@@ -10,6 +10,55 @@ const OshiCoachingApp = () => {
   const [userType, setUserType] = useState(null); // 'coach' or 'client'
   const [userData, setUserData] = useState(null); // usersテーブルのデータ
 
+  // パスワード再設定メールのリンクから来た場合、通常の画面ではなく再設定フォームを出す
+  const [recoveryMode, setRecoveryMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.location.hash.includes('type=recovery') ||
+      new URLSearchParams(window.location.search).get('type') === 'recovery'
+    );
+  });
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState({ type: '', text: '' });
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setPasswordMessage({ type: 'error', text: 'パスワードは6文字以上で設定してください' });
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setPasswordMessage({ type: 'error', text: '確認用のパスワードが一致しません' });
+      return;
+    }
+
+    setPasswordSaving(true);
+    setPasswordMessage({ type: '', text: '' });
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPasswordSaving(false);
+
+    if (error) {
+      setPasswordMessage({
+        type: 'error',
+        text: error.message || 'パスワードの変更に失敗しました。リンクの有効期限が切れている可能性があります。',
+      });
+      return;
+    }
+
+    setNewPassword('');
+    setNewPasswordConfirm('');
+    setPasswordMessage({ type: 'success', text: 'パスワードを変更しました。' });
+    // URLに残った recovery の印を消して、再読み込みでこの画面に戻らないようにする
+    try {
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch {
+      // 消せなくても動作に影響はない
+    }
+    setTimeout(() => setRecoveryMode(false), 1500);
+  };
+
   const fetchUserData = async (userId) => {
     const { data } = await supabase
       .from('users')
@@ -39,7 +88,10 @@ const OshiCoachingApp = () => {
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // パスワード再設定リンクから戻ってきたとき
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
+
       setSession(session)
 
       // セッション変更時もuser_typeを取得
@@ -706,6 +758,103 @@ const OshiCoachingApp = () => {
         <div className="text-center">
           <Heart className="w-16 h-16 text-pink-400 mx-auto mb-4 animate-pulse" />
           <p className="text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // パスワード再設定メールのリンクから来た場合
+  if (recoveryMode) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full mb-4">
+                <Heart className="w-8 h-8 text-white" fill="white" />
+              </div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
+              <p className="text-gray-600">新しいパスワードの設定</p>
+            </div>
+
+            {passwordMessage.text && (
+              <div
+                className={`mb-4 p-3 rounded-lg text-sm ${
+                  passwordMessage.type === 'error'
+                    ? 'bg-red-50 text-red-600 border border-red-200'
+                    : 'bg-green-50 text-green-600 border border-green-200'
+                }`}
+              >
+                {passwordMessage.text}
+              </div>
+            )}
+
+            {!session && (
+              <div className="mb-4 p-3 rounded-lg text-sm bg-yellow-50 text-yellow-700 border border-yellow-200">
+                リンクの有効期限が切れているようです。お手数ですが、ログイン画面から再度お手続きください。
+              </div>
+            )}
+
+            <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">新しいパスワード</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  required
+                  minLength={6}
+                />
+                <p className="text-xs text-gray-500 mt-1">※ 6文字以上で設定してください</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">確認のためもう一度</label>
+                <input
+                  type="password"
+                  value={newPasswordConfirm}
+                  onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={passwordSaving || !session}
+                className={`w-full py-3 rounded-lg font-medium text-white transition-all ${
+                  passwordSaving || !session
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl'
+                }`}
+              >
+                {passwordSaving ? '保存中...' : 'パスワードを変更する'}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button
+                onClick={async () => {
+                  try {
+                    window.history.replaceState({}, '', window.location.pathname);
+                  } catch {
+                    // 消せなくても動作に影響はない
+                  }
+                  setRecoveryMode(false);
+                  if (!session) await supabase.auth.signOut();
+                }}
+                className="text-pink-600 hover:text-pink-700 text-sm font-medium"
+              >
+                ログイン画面に戻る
+              </button>
+            </div>
+          </div>
+
+          <p className="text-center text-sm text-gray-500 mt-6">© 2026 推しコーチング運営事務局</p>
         </div>
       </div>
     )
