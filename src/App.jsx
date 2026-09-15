@@ -949,7 +949,8 @@ const OshiCoachingApp = () => {
         </header>
 
         {/* モバイル底部ナビゲーション */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-20 flex" style={{ backgroundColor: '#fff', borderTop: '1px solid #fce7f3' }}>
+        {/* paddingBottom: iPhone下端のホームバー（セーフエリア）にボタンが重ならないようにする */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-20 flex" style={{ backgroundColor: '#fff', borderTop: '1px solid #fce7f3', paddingBottom: 'env(safe-area-inset-bottom)' }}>
           {[
             { view: 'dashboard', icon: <Users className="w-5 h-5" />, label: 'クライアント' },
             { view: 'calendar', icon: <Calendar className="w-5 h-5" />, label: 'スケジュール' },
@@ -981,7 +982,8 @@ const OshiCoachingApp = () => {
           ))}
         </nav>
 
-        <div className="max-w-5xl mx-auto px-4 py-6 pb-24 lg:pb-6">
+        {/* 下部ナビとセーフエリアのぶん、最後のカードが隠れないように余白を取る */}
+        <div className="max-w-5xl mx-auto px-4 py-6 pb-[calc(6rem_+_env(safe-area-inset-bottom))] lg:pb-6">
           <div className="grid lg:grid-cols-4 gap-6">
             {/* サイドバー（PC専用） */}
             <div className="hidden lg:block lg:col-span-1">
@@ -1137,7 +1139,7 @@ const OshiCoachingApp = () => {
                           <div className="flex items-center justify-between py-3">
                             <div>
                               <p className="font-medium text-gray-800">メールアドレス</p>
-                              <p className="text-sm text-gray-600">{session?.user?.email || '未設定'}</p>
+                              <p className="text-sm text-gray-600 break-all">{session?.user?.email || '未設定'}</p>
                             </div>
                           </div>
                           <div className="flex items-center justify-between py-3">

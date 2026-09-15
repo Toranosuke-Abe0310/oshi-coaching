@@ -43,3 +43,17 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/*
+  iOS Safari は文字サイズが16px未満の入力欄をタップすると画面を勝手に拡大し、
+  しかも元の倍率に戻らない。チャットの入力欄などが該当するため、
+  スマホ・タブレット幅では入力系を一律16pxにして自動拡大を防ぐ。
+  PC幅（1024px以上）では従来どおりの見た目を保つ。
+*/
+@media (max-width: 1023px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
