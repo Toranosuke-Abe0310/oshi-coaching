@@ -2,8 +2,10 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <!-- タブ用は小さく表示されるので「推」の一文字だけ -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <!-- iOS のホーム画面アイコンは SVG を受け付けないため PNG（180x180）を用意する -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <!-- viewport-fit=cover : iPhone のセーフエリア（下部のホームバー）を CSS から扱えるようにする -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ec4899" />
