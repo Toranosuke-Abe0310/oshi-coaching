@@ -49,11 +49,16 @@ a {
   しかも元の倍率に戻らない。チャットの入力欄などが該当するため、
   スマホ・タブレット幅では入力系を一律16pxにして自動拡大を防ぐ。
   PC幅（1024px以上）では従来どおりの見た目を保つ。
+
+  !important が必要な理由:
+  要素セレクタ（input）はクラスセレクタ（.text-sm）より詳細度が低いため、
+  important を付けないと Tailwind の .text-sm（14px）に負けてしまう。
+  CSSの記述順を後にしても、詳細度の差は覆せない。
 */
 @media (max-width: 1023px) {
   input,
   textarea,
   select {
-    font-size: 16px;
+    font-size: 16px !important;
   }
 }
