@@ -4,6 +4,7 @@ import { Heart, Mail, Lock, User } from 'lucide-react'
 
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true)
+  const [isReset, setIsReset] = useState(false) // パスワード再設定メールの送信画面
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -30,6 +31,35 @@ const Login = () => {
       setMessage({
         type: 'error',
         text: error.message || 'ログインに失敗しました'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // パスワード再設定メールを送る
+  const handleResetRequest = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setMessage({ type: '', text: '' })
+
+    try {
+      // メール内のリンクからこのアプリに戻ってくるようにする
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/?type=recovery`,
+      })
+
+      if (error) throw error
+
+      // 登録が無いアドレスかどうかは、あえて区別しない（総当たりでアカウントの有無を調べられないようにするため）
+      setMessage({
+        type: 'success',
+        text: 'パスワード再設定用のメールを送りました。メールのリンクから新しいパスワードを設定してください。',
+      })
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error.message || 'メールの送信に失敗しました',
       })
     } finally {
       setLoading(false)
@@ -109,7 +139,7 @@ const Login = () => {
             </div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">推しコーチング</h1>
             <p className="text-gray-600">
-              {isLogin ? 'ログイン' : '新規登録'}
+              {isReset ? 'パスワードの再設定' : isLogin ? 'ログイン' : '新規登録'}
             </p>
           </div>
 
@@ -125,9 +155,19 @@ const Login = () => {
           )}
 
           {/* フォーム */}
-          <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4">
+          <form
+            onSubmit={isReset ? handleResetRequest : isLogin ? handleLogin : handleSignup}
+            className="space-y-4"
+          >
+            {/* 再設定画面の説明 */}
+            {isReset && (
+              <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                ご登録のメールアドレスを入力してください。パスワードを再設定するためのリンクをお送りします。
+              </p>
+            )}
+
             {/* 名前入力（新規登録時のみ） */}
-            {!isLogin && (
+            {!isLogin && !isReset && (
               <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -166,7 +206,8 @@ const Login = () => {
               </div>
             </div>
 
-            {/* パスワード */}
+            {/* パスワード（再設定メールの送信時は不要） */}
+            {!isReset && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 パスワード
@@ -188,7 +229,23 @@ const Login = () => {
                   ※ 6文字以上で設定してください
                 </p>
               )}
+              {isLogin && (
+                <div className="text-right mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsReset(true)
+                      setPassword('')
+                      setMessage({ type: '', text: '' })
+                    }}
+                    className="text-xs text-gray-500 hover:text-pink-600 underline"
+                  >
+                    パスワードをお忘れですか？
+                  </button>
+                </div>
+              )}
             </div>
+            )}
 
             {/* ログイン/登録ボタン */}
             <button
@@ -200,7 +257,13 @@ const Login = () => {
                   : 'bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg hover:shadow-xl'
               }`}
             >
-              {loading ? '処理中...' : isLogin ? 'ログイン' : '新規登録'}
+              {loading
+                ? '処理中...'
+                : isReset
+                ? '再設定メールを送る'
+                : isLogin
+                ? 'ログイン'
+                : '新規登録'}
             </button>
           </form>
 
@@ -208,12 +271,17 @@ const Login = () => {
           <div className="mt-6 text-center">
             <button
               onClick={() => {
-                setIsLogin(!isLogin)
+                if (isReset) {
+                  setIsReset(false)
+                  setIsLogin(true)
+                } else {
+                  setIsLogin(!isLogin)
+                }
                 setMessage({ type: '', text: '' })
               }}
               className="text-pink-600 hover:text-pink-700 text-sm font-medium"
             >
-              {isLogin ? '新規登録はこちら' : 'ログインはこちら'}
+              {isReset ? 'ログイン画面に戻る' : isLogin ? '新規登録はこちら' : 'ログインはこちら'}
             </button>
           </div>
 
