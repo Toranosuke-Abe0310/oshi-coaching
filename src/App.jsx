@@ -380,7 +380,7 @@ const OshiCoachingApp = () => {
   const [coachProfileLoaded, setCoachProfileLoaded] = useState(false);
   // 通知は承認済み申込とクライアントからの新着メッセージから組み立てる（下のuseEffect）
   const [notifications, setNotifications] = useState([]);
-  // 既読状態はDBに列が無いのでブラウザに保存する（null = まだ読み込んでいない）
+  // 既読状態は notification_reads テーブルに保存する（null = まだ読み込んでいない）
   const [notifReadIds, setNotifReadIds] = useState(null);
   
   // クライアント（ファン）側の画面分岐用
@@ -482,33 +482,84 @@ const OshiCoachingApp = () => {
   // ===== 通知 =====
   const notifStorageKey = session?.user?.id ? `oshi-notif-read-${session.user.id}` : null;
 
-  // 既読IDをブラウザから復元
+  // 既読IDをDBから読み込む（旧バージョンがブラウザに残した既読は一度だけDBへ引き継ぐ）
   useEffect(() => {
-    if (!notifStorageKey) return;
-    try {
-      const raw = window.localStorage.getItem(notifStorageKey);
-      setNotifReadIds(new Set(raw ? JSON.parse(raw) : []));
-    } catch {
-      // 保存領域が使えない環境でも通知自体は表示できるようにする
-      setNotifReadIds(new Set());
-    }
-  }, [notifStorageKey]);
+    const userId = session?.user?.id;
+    if (!userId) return;
+    let cancelled = false;
 
-  const markNotificationsRead = (ids) => {
-    if (!ids || ids.length === 0) return;
-    setNotifications(prev => prev.map(n => (ids.includes(n.id) ? { ...n, read: true } : n)));
-    setNotifReadIds(prev => {
-      const next = new Set(prev || []);
-      ids.forEach(id => next.add(id));
+    const loadReadIds = async () => {
+      const { data, error } = await supabase
+        .from('notification_reads')
+        .select('notification_id')
+        .eq('user_id', userId);
+      if (cancelled) return;
+      if (error) {
+        // 読めなくても通知自体は表示できるようにする（全部未読扱い）
+        console.error('既読の読み込みに失敗しました:', error);
+        setNotifReadIds(new Set());
+        return;
+      }
+
+      const ids = new Set((data || []).map(r => r.notification_id));
+
+      // 旧バージョンがブラウザに保存していた既読を拾う
+      let legacy = [];
       if (notifStorageKey) {
         try {
-          window.localStorage.setItem(notifStorageKey, JSON.stringify([...next]));
+          const raw = window.localStorage.getItem(notifStorageKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          legacy = Array.isArray(parsed) ? parsed : [];
         } catch {
-          // 保存できなくてもこのセッション中は既読として扱う
+          legacy = [];
         }
       }
+      const missing = legacy.filter(id => typeof id === 'string' && !ids.has(id));
+      if (missing.length > 0) {
+        const { error: migrateError } = await supabase
+          .from('notification_reads')
+          .upsert(
+            missing.map(id => ({ user_id: userId, notification_id: id })),
+            { onConflict: 'user_id,notification_id' }
+          );
+        if (!migrateError) missing.forEach(id => ids.add(id));
+      }
+      if (notifStorageKey && legacy.length > 0) {
+        try {
+          window.localStorage.removeItem(notifStorageKey);
+        } catch {
+          // 消せなくても動作に影響はない
+        }
+      }
+
+      if (!cancelled) setNotifReadIds(ids);
+    };
+
+    loadReadIds();
+    return () => { cancelled = true; };
+  }, [session?.user?.id, notifStorageKey]);
+
+  const markNotificationsRead = async (ids) => {
+    const userId = session?.user?.id;
+    if (!ids || ids.length === 0 || !userId) return;
+    const unread = ids.filter(id => !(notifReadIds && notifReadIds.has(id)));
+    if (unread.length === 0) return;
+
+    // 画面はすぐ既読にして、保存はそのあと
+    setNotifications(prev => prev.map(n => (unread.includes(n.id) ? { ...n, read: true } : n)));
+    setNotifReadIds(prev => {
+      const next = new Set(prev || []);
+      unread.forEach(id => next.add(id));
       return next;
     });
+
+    const { error } = await supabase
+      .from('notification_reads')
+      .upsert(
+        unread.map(id => ({ user_id: userId, notification_id: id })),
+        { onConflict: 'user_id,notification_id' }
+      );
+    if (error) console.error('既読の保存に失敗しました:', error);
   };
 
   // 通知の組み立て
