@@ -2,6 +2,31 @@ import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import Login from './Login'
 import { Heart, MessageCircle, Users, Calendar, FileText, Settings, LogOut, Menu, X, Search, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+
+/*
+  Supabase Storage の「キー」（保存先のパス）には英数字と一部の記号しか使えない。
+  日本語のファイル名をそのまま渡すと Invalid key エラーでアップロードが失敗するため、
+  保存先の名前だけ安全な文字に置き換える。
+  画面に出す名前・ダウンロード時の名前は元のまま（files.file_name に保持）。
+*/
+const toStorageSafeName = (originalName) => {
+  const name = String(originalName || 'file');
+  const dot = name.lastIndexOf('.');
+  // 先頭のドット（.gitignore のような名前）は拡張子とみなさない
+  const hasExt = dot > 0;
+  const base = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot + 1) : '';
+
+  const clean = (s) => s
+    .replace(/[^A-Za-z0-9._-]/g, '_')  // 使える文字以外は _ に
+    .replace(/_+/g, '_')               // _ の連続はまとめる
+    .replace(/^[._-]+|[._-]+$/g, '');  // 前後の記号は落とす
+
+  const safeBase = clean(base).slice(0, 80) || 'file';
+  const safeExt = clean(ext).slice(0, 10);
+  return safeExt ? `${safeBase}.${safeExt}` : safeBase;
+};
+
 const OshiCoachingApp = () => {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2078,7 +2103,8 @@ const OshiCoachingApp = () => {
                                 const fileSize = file.size < 1024 ? `${file.size}B` :
                                   file.size < 1048576 ? `${Math.round(file.size / 1024)}KB` :
                                   `${Math.round(file.size / 1048576)}MB`;
-                                const filePath = `${session.user.id}/${selectedClient.id}/${Date.now()}-${file.name}`;
+                                // 保存先のパスは英数字だけにする（日本語名だと Invalid key で失敗するため）
+                                const filePath = `${session.user.id}/${selectedClient.id}/${Date.now()}-${toStorageSafeName(file.name)}`;
                                 // Supabase Storageにアップロード
                                 const { error: uploadError } = await supabase.storage
                                   .from('coach-files').upload(filePath, file);
@@ -2135,7 +2161,10 @@ const OshiCoachingApp = () => {
                                       <button
                                         onClick={() => {
                                           if (file.path) {
-                                            const { data } = supabase.storage.from('coach-files').getPublicUrl(file.path);
+                                            // 保存先のパスは英数字化しているので、落とすときは元のファイル名に戻す
+                                            const { data } = supabase.storage
+                                              .from('coach-files')
+                                              .getPublicUrl(file.path, { download: file.name });
                                             window.open(data.publicUrl, '_blank');
                                           }
                                         }}
