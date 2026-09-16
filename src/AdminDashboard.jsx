@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Check, X, Search, Mail, Users, Calendar, UserPlus, LogOut, Lock, MessageCircle, Send, ArrowLeft } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
+// コーチ1人が担当できるクライアント数の上限。
+// 打ち間違いで極端な数字が入るのを防ぐための歯止め。
+const MAX_CLIENTS_LIMIT = 100;
+
 const AdminDashboard = () => {
   // 認証関連
   const [adminSession, setAdminSession] = useState(null);
@@ -272,9 +276,32 @@ const AdminDashboard = () => {
     return () => supabase.removeChannel(channel);
   }, [chatCoach, adminSession]);
 
+  // 上限人数として妥当な値かを確かめる。
+  // 空欄は「無制限」の意味なので null を返す。
+  // 戻り値が undefined のときは入力が不正（呼び出し側で中断する）。
+  const parseMaxClients = (value) => {
+    const raw = String(value ?? '').trim();
+    if (raw === '') return null;
+    if (!/^\d+$/.test(raw)) {
+      alert('上限人数は半角の数字で入力してください。');
+      return undefined;
+    }
+    const n = parseInt(raw, 10);
+    if (n < 1) {
+      alert('上限人数は1以上で入力してください。0人にしたい場合は、コーチを非公開にしてください。');
+      return undefined;
+    }
+    if (n > MAX_CLIENTS_LIMIT) {
+      alert(`上限人数は${MAX_CLIENTS_LIMIT}以下で入力してください。実際にはこれ以上は担当しきれないはずです。`);
+      return undefined;
+    }
+    return n;
+  };
+
   // 最大クライアント数を保存
   const handleSaveMaxClients = async (coachId, value) => {
-    const maxClients = value === '' ? null : parseInt(value);
+    const maxClients = parseMaxClients(value);
+    if (maxClients === undefined) return;
     const { error } = await supabase
       .from('coaches')
       .update({ max_clients: maxClients })
@@ -301,6 +328,11 @@ const AdminDashboard = () => {
 
   const handleCreateCoach = async (e) => {
     e.preventDefault();
+
+    // 登録時も上限人数の値を確かめる
+    const maxClients = parseMaxClients(coachForm.maxClients);
+    if (maxClients === undefined) return;
+
     setCoachFormLoading(true);
     setCoachFormMessage({ type: '', text: '' });
 
@@ -327,7 +359,7 @@ const AdminDashboard = () => {
           available_days: coachForm.availableDays,
           image: coachForm.image,
           clients_count: 0,
-          max_clients: coachForm.maxClients === '' ? null : parseInt(coachForm.maxClients)
+          max_clients: maxClients
         });
       if (coachError) throw new Error('coachesテーブルへの登録失敗: ' + coachError.message);
 
@@ -644,7 +676,9 @@ const AdminDashboard = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">上限人数（空欄=無制限）</label>
                   <input
                     type="number"
-                    min="0"
+                    min="1"
+                    max={MAX_CLIENTS_LIMIT}
+                    step="1"
                     value={coachForm.maxClients}
                     onChange={e => setCoachForm({...coachForm, maxClients: e.target.value})}
                     placeholder="5"
@@ -1049,6 +1083,8 @@ const AdminDashboard = () => {
                       <input
                         type="number"
                         min="1"
+                        max={MAX_CLIENTS_LIMIT}
+                        step="1"
                         defaultValue={coach.max_clients || ''}
                         placeholder="無制限"
                         onBlur={e => handleSaveMaxClients(coach.id, e.target.value)}
