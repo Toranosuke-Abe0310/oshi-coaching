@@ -278,6 +278,24 @@ const OshiCoachingApp = () => {
     fetchClients();
   }, [userType, session, clientsRefreshKey]);
 
+  // コーチ側: 申込の承認をリアルタイムに拾う。
+  // これが無いと、運営が承認してもコーチがページを再読み込みするまで
+  // 新しいクライアントも通知も出てこない。
+  useEffect(() => {
+    if (userType !== 'coach' || !session?.user?.id) return;
+    const coachId = session.user.id;
+    const channel = supabase
+      .channel(`coach-apps-${coachId}-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, (payload) => {
+        const row = payload.new || payload.old;
+        if (!row || row.coach_id !== coachId) return;
+        // 一覧と通知を組み立て直す（fetchClients が走る）
+        setClientsRefreshKey(k => k + 1);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userType, session?.user?.id]);
+
   // コーチ側: Supabaseからスケジュール取得
   useEffect(() => {
     if (userType !== 'coach' || !session?.user) return;
@@ -683,6 +701,32 @@ const OshiCoachingApp = () => {
       }))
     });
   };
+
+  // クライアント一覧を取り直したら、開きっぱなしの詳細画面の数値も追従させる。
+  // これが無いと、詳細を開いたままスケジュールを「実施済み」にしても
+  // 詳細ヘッダーのセッション回数だけ古い値のまま残ってしまう。
+  // ※ selectedClient の宣言より後ろに置くこと（前に置くと初期化前参照でクラッシュする）
+  useEffect(() => {
+    if (!selectedClient) return;
+    const fresh = realClients.find(c => c.id === selectedClient.id);
+    if (!fresh) return;
+    setSelectedClient(prev => {
+      if (!prev) return prev;
+      // 値が変わっていなければ同じオブジェクトを返す（再レンダリングの無限ループ防止）
+      if (
+        prev.sessions === fresh.sessions &&
+        prev.nextSession === fresh.nextSession &&
+        prev.lastMessage === fresh.lastMessage
+      ) return prev;
+      // memo と files は詳細画面で読み込んだものなので引き継ぐ
+      return {
+        ...prev,
+        sessions: fresh.sessions,
+        nextSession: fresh.nextSession,
+        lastMessage: fresh.lastMessage
+      };
+    });
+  }, [realClients, selectedClient]);
 
   // メッセージ内のURLをリンクに変換して表示
   const renderMessageText = (text, isMine) => {
