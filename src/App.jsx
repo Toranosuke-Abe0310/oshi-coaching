@@ -27,6 +27,31 @@ const toStorageSafeName = (originalName) => {
   return safeExt ? `${safeBase}.${safeExt}` : safeBase;
 };
 
+/*
+  coach-files は非公開のバケットなので、URLを知っているだけでは開けない。
+  開くたびに、その人の権限で60秒だけ有効なURLを発行する。
+
+  ポップアップブロック対策:
+  window.open は「クリックした直後」でないとブロックされる。URLの発行を待って
+  から開こうとすると手遅れになるため、先に空のタブを開き、URLが取れてから
+  行き先を入れる。
+*/
+const openStoredFile = async (path, downloadName) => {
+  if (!path) return;
+  const tab = window.open('', '_blank');
+  const { data, error } = await supabase.storage
+    .from('coach-files')
+    .createSignedUrl(path, 60, downloadName ? { download: downloadName } : undefined);
+  if (error || !data?.signedUrl) {
+    if (tab) tab.close();
+    console.error('署名付きURLの発行に失敗しました', error);
+    alert('ファイルを開けませんでした。時間をおいて、もう一度お試しください。');
+    return;
+  }
+  if (tab) tab.location.href = data.signedUrl;
+  else window.location.assign(data.signedUrl);
+};
+
 const OshiCoachingApp = () => {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2159,15 +2184,8 @@ const OshiCoachingApp = () => {
                                     </div>
                                     <div className="flex gap-2">
                                       <button
-                                        onClick={() => {
-                                          if (file.path) {
-                                            // 保存先のパスは英数字化しているので、落とすときは元のファイル名に戻す
-                                            const { data } = supabase.storage
-                                              .from('coach-files')
-                                              .getPublicUrl(file.path, { download: file.name });
-                                            window.open(data.publicUrl, '_blank');
-                                          }
-                                        }}
+                                        // 保存先のパスは英数字化しているので、落とすときは元のファイル名に戻す
+                                        onClick={() => openStoredFile(file.path, file.name)}
                                         className="px-3 py-1 text-pink-600 hover:bg-pink-50 rounded-lg text-sm"
                                       >
                                         ダウンロード
@@ -2653,12 +2671,7 @@ const OshiCoachingApp = () => {
                         </div>
                       </div>
                       <button
-                        onClick={() => {
-                          if (file.path) {
-                            const { data } = supabase.storage.from('coach-files').getPublicUrl(file.path);
-                            window.open(data.publicUrl, '_blank');
-                          }
-                        }}
+                        onClick={() => openStoredFile(file.path)}
                         className="px-4 py-1.5 bg-pink-500 text-white rounded-lg hover:bg-pink-600 text-sm"
                       >
                         開く
