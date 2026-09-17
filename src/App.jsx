@@ -147,19 +147,20 @@ const OshiCoachingApp = () => {
         .select('*')
         .order('created_at', { ascending: true });
       if (data) {
-        // コーチごとの有効申し込み数を取得（pending + approved）
-        const coachIds = data.map(c => c.user_id).filter(Boolean);
+        // コーチごとの有効申し込み数（pending + approved）を取得する。
+        //
+        // applications テーブルは当事者しか読めないため、ここで直接 select すると
+        // 他人の申し込みが数えられず、残り枠がいつも「空き」に見えてしまう。
+        // 件数だけを返す関数（coach_active_application_counts）を経由して数える。
         let appCountMap = {};
-        if (coachIds.length > 0) {
-          const { data: apps } = await supabase
-            .from('applications')
-            .select('coach_id')
-            .in('coach_id', coachIds)
-            .in('status', ['pending', 'approved']);
-          (apps || []).forEach(a => {
-            appCountMap[a.coach_id] = (appCountMap[a.coach_id] || 0) + 1;
-          });
+        const { data: counts, error: countError } = await supabase
+          .rpc('coach_active_application_counts');
+        if (countError) {
+          console.error('申し込み数の取得に失敗しました', countError);
         }
+        (counts || []).forEach(row => {
+          appCountMap[row.coach_id] = Number(row.active_count) || 0;
+        });
         setCoaches(data.map(c => ({
           id: c.id,
           user_id: c.user_id,
@@ -2435,15 +2436,15 @@ const OshiCoachingApp = () => {
                             .eq('user_id', currentCoach.user_id).single();
                           const limit = latestCoach?.max_clients ?? null;
                           if (limit != null) {
-                            const { count } = await supabase
-                              .from('applications')
-                              .select('id', { count: 'exact', head: true })
-                              .eq('coach_id', currentCoach.user_id)
-                              .in('status', ['pending', 'approved']);
-                            if ((count ?? 0) >= limit) {
+                            // 他人の申し込みは直接読めないので、件数だけを返す関数で数える
+                            const { data: counts } = await supabase
+                              .rpc('coach_active_application_counts');
+                            const row = (counts || []).find(r => r.coach_id === currentCoach.user_id);
+                            const count = Number(row?.active_count) || 0;
+                            if (count >= limit) {
                               alert('申し訳ありません。このコーチは満員になりました。');
                               setCoaches(prev => prev.map(c => c.user_id === currentCoach.user_id
-                                ? { ...c, maxClients: limit, currentApplications: count ?? 0 }
+                                ? { ...c, maxClients: limit, currentApplications: count }
                                 : c));
                               return;
                             }
